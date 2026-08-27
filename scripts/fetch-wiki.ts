@@ -7,8 +7,8 @@
  * 合规：只读公开的 MediaWiki API，限频 ≥1 秒，标明 UA；正文按 CC BY-SA 4.0 使用，
  *      每篇 frontmatter 写明来源 URL 与许可。抓下来的语料不入库（见 .gitignore）。
  *
- * 用法：pnpm tsx scripts/fetch-wiki.ts            抓默认清单
- *       pnpm tsx scripts/fetch-wiki.ts 花岗岩 片麻岩   抓指定条目
+ * 用法：pnpm fetch:wiki                 抓默认 118 条清单
+ *       pnpm fetch:wiki 花岗岩 片麻岩    只抓指定条目
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

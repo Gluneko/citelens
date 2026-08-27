@@ -6,7 +6,8 @@
   "scripts": {
     "chunks": "node --import tsx scripts/build-chunks.ts",
     "test": "node --import tsx --test src/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "fetch:wiki": "node --import tsx scripts/fetch-wiki.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

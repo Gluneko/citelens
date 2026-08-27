@@ -44,6 +44,8 @@ RAG 公认的难点是"模型会不会编"。这个问题有一半可以确定�
 pnpm install
 pnpm test      # 无需网络与 API key
 pnpm chunks    # 语料 → data/chunks.jsonl，并打印长度分布
+
+pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问维基的网络）
 ```
 
 ## 语料与许可
@@ -51,7 +53,7 @@ pnpm chunks    # 语料 → data/chunks.jsonl，并打印长度分布
 - `data/corpus/`：12 篇**合成教学语料**（依据公开教科书知识撰写，CC0），入库，
   保证 clone 下来就能跑通全流程与 CI——不依赖任何外部服务
 - `data/corpus-wiki/`：可选的中文维基百科地学条目（CC BY-SA 4.0），**不入库**，
-  用 `pnpm tsx scripts/fetch-wiki.ts` 自行抓取（118 个条目清单，限频 1.1 秒，标明 UA）
+  用 `pnpm fetch:wiki` 自行抓取（118 个条目清单，限频 1.1 秒，标明 UA）
 - 金标准答案始终落在合成语料里；抓取语料只负责把"干草堆"变大，让同一套题更难、指标更有区分度
 - 教科书、行业标准、付费文献一律不入库
 
