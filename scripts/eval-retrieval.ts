@@ -9,6 +9,8 @@
  *   pnpm eval -- --compare                    四种配置一次跑完并排对照
  *   pnpm eval -- --verbose                    逐题详情（精排模式下会显示"从第几名被顶上来"）
  *   pnpm eval -- --pool 50                    候选池大小（默认 50）
+ *   pnpm eval -- --guarantee 15               混合模式下每路保底名额（默认 15，设 0 关闭）
+ *   pnpm eval -- --rerank-top 20              只精排候选池前 N 条（默认全池，精排很贵）
  */
 import { existsSync, readFileSync } from "node:fs";
 import { loadCorpus } from "../src/corpus/load.js";
@@ -27,6 +29,8 @@ const verbose = argv.includes("--verbose");
 const compare = argv.includes("--compare");
 const poolSize = Number(opt("pool") ?? 50);
 const topK = Number(opt("top") ?? 5);
+const guarantee = Number(opt("guarantee") ?? 15);
+const rerankTop = Number(opt("rerank-top") ?? 0);
 
 const VEC = "data/index/vectors.json";
 const chunks: Chunk[] = readFileSync("data/chunks.jsonl", "utf-8")
@@ -48,7 +52,7 @@ if (existsSync(VEC)) {
   }
 }
 
-console.log(`📚 文档 ${docs.length} 篇｜chunk ${chunks.length}｜候选池 ${poolSize}｜返回 ${topK}`);
+console.log(`📚 文档 ${docs.length} 篇｜chunk ${chunks.length}｜候选池 ${poolSize}｜保底 ${guarantee}｜精排前 ${rerankTop || poolSize}｜返回 ${topK}`);
 if (vector) console.log(`🧠 向量 ${vector.model}`);
 
 const plans: Array<{ mode: RetrieveMode; rerank: boolean }> = compare
@@ -56,6 +60,7 @@ const plans: Array<{ mode: RetrieveMode; rerank: boolean }> = compare
       { mode: "bm25", rerank: false },
       { mode: "vector", rerank: false },
       { mode: "hybrid", rerank: false },
+      { mode: "vector", rerank: true },
       { mode: "hybrid", rerank: true },
     ]
   : [{ mode: (opt("mode") ?? "bm25") as RetrieveMode, rerank: argv.includes("--rerank") }];
@@ -71,7 +76,7 @@ for (const plan of plans) {
   }
   const pipeline = new RetrievalPipeline(
     { bm25, vector, embedder, reranker: plan.rerank ? reranker : undefined },
-    { mode: plan.mode, poolSize, topK },
+    { mode: plan.mode, poolSize, topK, guarantee, rerankTop },
   );
   const t0 = performance.now();
   const outcomes = await runCases(pipeline, gold);

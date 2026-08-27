@@ -34,6 +34,18 @@ export interface PipelineOptions {
   poolSize?: number;
   topK?: number;
   rrfK?: number;
+  /**
+   * 单路保底名额：混合模式下，强制把每一路各自的前 N 名放进候选池。
+   *
+   * 为什么需要它（实弹教训）：RRF 只奖励"两路共识"，
+   * 于是【只有一路能找到的真答案】会被一堆两路都中游的项挤出候选池。
+   * 实测 g12 的答案在向量单路排第 17，融合后却掉出前 50——
+   * 融合反而让候选池召回率从 100% 掉到 94.7%。
+   * 保底名额就是给"另辟蹊径的那一路"留座位。设 0 关闭。
+   */
+  guarantee?: number;
+  /** 只精排候选池的前 N 条（精排很贵，这是成本旋钮）。0/未设表示全池精排 */
+  rerankTop?: number;
 }
 
 export interface PipelineResult {
@@ -58,7 +70,9 @@ export class RetrievalPipeline {
     const topK = this.opts.topK ?? 5;
     if (!this.deps.reranker) return { hits: pool.slice(0, topK), pool };
 
-    const ranked = await rerank(this.deps.reranker, query, pool, (c) => c.context ?? c.text, topK);
+    const n = this.opts.rerankTop && this.opts.rerankTop > 0 ? this.opts.rerankTop : pool.length;
+    const toRank = pool.slice(0, n);
+    const ranked = await rerank(this.deps.reranker, query, toRank, (c) => c.context ?? c.text, topK);
     return { hits: ranked.map((r) => r.item), pool, liftedFrom: ranked.map((r) => r.before) };
   }
 
@@ -77,10 +91,23 @@ export class RetrievalPipeline {
     if (!bm25 || !vector || !embedder) throw new Error("hybrid 模式需要两路索引");
     const lex = bm25.search(query, n).map((h) => h.chunk);
     const sem = (await vector.search(embedder, query, n)).map((h) => h.chunk);
-    return rrf(
+    const fused = rrf(
       [{ name: "bm25", items: lex }, { name: "vector", items: sem }],
       (c) => c.id,
       this.opts.rrfK ?? 60,
-    ).slice(0, n).map((f) => f.item);
+    ).map((f) => f.item);
+
+    const pool = fused.slice(0, n);
+    const g = this.opts.guarantee ?? 0;
+    if (g <= 0) return pool;
+
+    // 单路保底：把每路各自前 g 名中被融合挤掉的，塞回候选池尾部
+    const have = new Set(pool.map((c) => c.id));
+    const rescued: Chunk[] = [];
+    for (const c of [...lex.slice(0, g), ...sem.slice(0, g)]) {
+      if (!have.has(c.id)) { have.add(c.id); rescued.push(c); }
+    }
+    if (!rescued.length) return pool;
+    return [...pool.slice(0, Math.max(0, n - rescued.length)), ...rescued];
   }
 }

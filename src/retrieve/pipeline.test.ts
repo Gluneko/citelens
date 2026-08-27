@@ -68,3 +68,41 @@ test("label 如实反映当前配置", async () => {
     "BM25+精排",
   );
 });
+
+test("单路保底：只有一路能找到的答案，不会被 RRF 挤出候选池", async () => {
+  // 构造 RRF 的典型偏见场景：真答案只有语义路能捞到，且不在最前面
+  const many = Array.from({ length: 30 }, (_, i) => C(`noise${i}`, `无关内容${i} 岩石 玄武岩`));
+  const gem = C("gem", "气孔是气体逸出留下的孔洞");
+  const all = [...many, gem];
+  const emb = new FakeEmbedder(32);
+  const vi = new VectorIndex(emb.name, emb.dim);
+  const vs = await emb.embed(all.map((c) => c.text));
+  all.forEach((c, i) => vi.add(c, vs[i]!));
+  const bm = buildBm25(all);
+
+  const noGuard = new RetrievalPipeline({ bm25: bm, vector: vi, embedder: emb },
+    { mode: "hybrid", poolSize: 5, topK: 5, guarantee: 0 });
+  const withGuard = new RetrievalPipeline({ bm25: bm, vector: vi, embedder: emb },
+    { mode: "hybrid", poolSize: 5, topK: 5, guarantee: 3 });
+
+  const q = "气孔孔洞";
+  const a = await noGuard.search(q);
+  const b = await withGuard.search(q);
+  // 保底版的候选池必须包含语义路前 3 名，无保底版不保证
+  const semTop3 = (await vi.search(emb, q, 3)).map((h) => h.chunk.id);
+  for (const id of semTop3) {
+    assert.ok(b.pool.some((c) => c.id === id), `保底应把语义路第一梯队 ${id} 纳入候选池`);
+  }
+  assert.equal(b.pool.length, 5, "保底不应撑大候选池——它替换尾部，不加座位");
+  assert.ok(a.pool.length === 5);
+});
+
+test("rerankTop 只精排候选池前 N 条（成本旋钮）", async () => {
+  const cs = Array.from({ length: 20 }, (_, i) => C(`c${i}`, `内容${i} 玄武岩`));
+  cs.push(C("target", "气孔孔洞在此"));
+  const bm = buildBm25(cs);
+  const p = new RetrievalPipeline({ bm25: bm, reranker: new FakeReranker() },
+    { mode: "bm25", poolSize: 21, topK: 3, rerankTop: 2 });
+  const r = await p.search("玄武岩");
+  assert.ok(r.liftedFrom!.every((x) => x <= 2), "只精排前 2 条时，结果不可能来自更靠后的候选");
+});
