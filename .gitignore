@@ -1,0 +1,10 @@
+node_modules/
+dist/
+output/
+.env
+*.log
+.DS_Store
+_to_delete/
+data/chunks.jsonl
+data/index/
+models/

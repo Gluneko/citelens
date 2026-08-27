@@ -1,0 +1,20 @@
+{"id": "g01", "question": "玄武岩的二氧化硅含量范围是多少？", "goldDocIds": ["basalt"], "mustContain": ["45", "52"], "note": "数字型：Day 4 校验器要验证答案里的数字确实出现在被引片段中"}
+{"id": "g02", "question": "TAS 图解的横轴和纵轴分别代表什么？", "goldDocIds": ["tas-classification"], "mustContain": ["二氧化硅", "氧化钠", "氧化钾"], "note": "定义型：术语齐全，BM25 与向量都应命中"}
+{"id": "g03", "question": "给深成岩用 TAS 定名应该用哪一套方案？", "goldDocIds": ["tas-classification"], "mustContain": ["Middlemost"], "note": "专名型：外文人名，BM25 的主场"}
+{"id": "g04", "question": "CIPW 计算结果里标准石英和标准霞石可以同时出现吗？", "goldDocIds": ["cipw-norm"], "mustContain": ["不能"], "note": "硬约束型：答案是一条判据，考模型敢不敢给否定回答"}
+{"id": "g05", "question": "化探的异常下限是怎么算出来的？", "goldDocIds": ["geochem-anomaly"], "mustContain": ["对数", "平均值", "2 倍标准差"], "note": "过程型：答案跨越多个句子，考切分是否把过程切碎"}
+{"id": "g06", "question": "地球化学异常的浓度分带分成哪几带，各按几倍异常下限划分？", "goldDocIds": ["geochem-anomaly"], "mustContain": ["外带", "中带", "内带"], "note": "结构型：答案是一组对应关系"}
+{"id": "g07", "question": "水系沉积物测量为什么要过筛到细粒级？", "goldDocIds": ["stream-sediment-survey"], "mustContain": ["吸附"], "note": "因果型：问的是原因而非事实，向量应占优"}
+{"id": "g08", "question": "腕足动物和双壳类在对称性上有什么区别？", "goldDocIds": ["brachiopod"], "mustContain": ["对称面"], "note": "对比型：两个概念的差异，检索要同时命中两者所在片段"}
+{"id": "g09", "question": "腕足动物目一级分类最关键的构造是什么？", "goldDocIds": ["brachiopod"], "mustContain": ["腕骨"], "note": "要点型：一词命中，考排序能否把它顶到前面"}
+{"id": "g10", "question": "一个化石要满足什么条件才适合当标准化石？", "goldDocIds": ["index-fossil"], "mustContain": ["演化", "分布", "数量", "保存"], "note": "清单型：四个条件缺一不可，考召回的完整性"}
+{"id": "g11", "question": "花岗岩中石英的体积含量大约是多少？", "goldDocIds": ["granite"], "mustContain": ["20"], "note": "数字型：只有一个数，最容易被模型编大编小"}
+{"id": "g12", "question": "那种黑色的火山石头上面的小洞是怎么来的？", "goldDocIds": ["basalt"], "mustContain": ["气孔"], "note": "口语改写型：整句没有一个专业术语，BM25 大概率失手，向量该赢"}
+{"id": "g13", "question": "岩浆在地底下慢慢冷却，会形成什么样子的石头？", "goldDocIds": ["igneous-rock"], "mustContain": ["粗粒"], "note": "口语改写型：考语义匹配'缓慢冷却→粗粒结构'"}
+{"id": "g14", "question": "板岩、千枚岩、片岩、片麻岩里哪个变质程度最高？", "goldDocIds": ["metamorphic-rock"], "mustContain": ["片麻岩"], "note": "排序型：四个词都在同一句里，考模型读懂'依次升高'"}
+{"id": "g15", "question": "大洋中脊喷出的玄武岩属于哪个系列？", "goldDocIds": ["basalt", "plate-tectonics"], "mustContain": ["拉斑"], "note": "跨文档型：两篇都提到，理想检索应同时召回，为 Day 5 多跳做铺垫"}
+{"id": "g16", "question": "斑岩型铜金矿床通常出现在什么构造背景下？", "goldDocIds": ["plate-tectonics"], "mustContain": ["俯冲"], "note": "背景型：成矿与构造的关联"}
+{"id": "g17", "question": "沉积岩占地壳体积多少，又覆盖了多大比例的陆地表面？", "goldDocIds": ["sedimentary-rock"], "mustContain": ["5", "75"], "note": "双数字型：两个数字容易被张冠李戴，数字幻觉重点考题"}
+{"id": "g18", "question": "低于检出限的化探数据参与统计时怎么处理？", "goldDocIds": ["geochem-anomaly"], "mustContain": ["二分之一", "DL/2"], "note": "细节型：藏在文末，考切分是否把尾部内容切丢"}
+{"id": "g19", "question": "烧失量高到多少就说明 TAS 投点结果不可靠？", "goldDocIds": ["tas-classification"], "mustContain": ["3"], "note": "阈值型：数字 + 条件，考精确性"}
+{"id": "g20", "question": "华南某矿区二〇二四年的金平均品位是多少克每吨？", "goldDocIds": [], "note": "拒答题：语料里根本没有这个信息。检索必然捞不到相关片段，模型必须诚实说不知道——Day 4 的核心对抗题"}
