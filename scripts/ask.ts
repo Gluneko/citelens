@@ -126,7 +126,19 @@ for (let round = 0; round <= MAX_REPAIR; round++) {
       if (m.type === "system" && m.subtype === "init") sessionId = m.session_id;
       else if (m.type === "result") {
         if (m.subtype !== "success" || m.is_error) {
-          console.error(`\n❌ 生成失败：${m.subtype}`);
+          // 把真实错误打出来——只印 subtype 等于什么都没说（踩过）
+          const detail = "result" in m && typeof (m as any).result === "string"
+            ? (m as any).result
+            : JSON.stringify(m).slice(0, 400);
+          console.error(`\n❌ 生成失败（subtype=${m.subtype}, is_error=${m.is_error}）`);
+          console.error(`   ${detail}`);
+          if (/401|unauthor|invalid.*key|authentication/i.test(detail)) {
+            console.error(`\n   看起来是鉴权失败。检查 .env 里的 LLM_API_KEY 是否已填成真实密钥。`);
+            console.error(`   当前端点：${config.anthropicBaseUrl}`);
+          }
+          if (/402|balance|insufficient/i.test(detail)) {
+            console.error(`\n   看起来是余额不足——账户充值后重跑即可。`);
+          }
           break;
         }
         roundCost = m.total_cost_usd;
