@@ -7,10 +7,15 @@
  * 校准已证明拒答无法用检索分数确定性化（相关性 ≠ 答案在不在里面），
  * 所以这里【不设阈值】，纯粹考察铁律 4 交给模型自判的可靠性。
  *
- * 用法：pnpm eval:answer                 全部 24 题（约 $5，慎跑）
- *       pnpm eval:answer -- --refusal    只跑 5 道拒答题（约 $1）
- *       pnpm eval:answer -- --limit 6    只跑前 6 题
- *       pnpm eval:answer -- --from g13   断点续跑
+ * 用法：pnpm eval:answer                    全部 28 题跑 1 轮（约 $5）
+ *       pnpm eval:answer -- --refusal       只跑 9 道拒答题（约 $1.5）
+ *       pnpm eval:answer -- --repeat 3      跑 3 轮，报均值与方差 ← 一次满分不叫基线
+ *       pnpm eval:answer -- --limit 6       只跑前 6 题
+ *       pnpm eval:answer -- --from g13      断点续跑
+ *
+ * 为什么要重复采样：模型输出有随机性。实测中同一道 g01
+ * 手动跑时被 quote.not-substring 拦下（"矽"写成"硅"），评测里却零打回通过。
+ * **一次满分里有运气成分，三次稳定才叫基线。**
  */
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -63,16 +68,21 @@ if (argv.includes("--refusal")) cases = cases.filter((c) => c.goldDocIds.length 
 const from = opt("from");
 if (from) { const i = cases.findIndex((c) => c.id === from); if (i > 0) cases = cases.slice(i); }
 const limit = opt("limit"); if (limit) cases = cases.slice(0, Number(limit));
+const repeat = Math.max(1, Number(opt("repeat") ?? 1));
 
-console.log(`🧪 生成层评测｜${cases.length} 题｜模型 ${config.model}｜${pipeline.label}｜不设拒答阈值\n`);
+console.log(`🧪 生成层评测｜${cases.length} 题 × ${repeat} 轮｜模型 ${config.model}｜${pipeline.label}｜不设拒答阈值\n`);
 
 interface Row {
+  run: number;
   id: string; answerable: boolean; refused: boolean; rounds: number;
   errors: number; rules: string[]; cost: number; honest: boolean;
 }
-const rows: Row[] = [];
+const allRows: Row[] = [];
 let fatal = false;
 
+for (let run = 1; run <= repeat && !fatal; run++) {
+if (repeat > 1) console.log(`── 第 ${run}/${repeat} 轮 ──`);
+const rows: Row[] = [];
 for (const c of cases) {
   const retrieved = await pipeline.search(c.question);
   let prompt = `请依据以下检索片段回答问题。\n\n问题：${c.question}\n\n` +
@@ -121,7 +131,7 @@ for (const c of cases) {
   const answerable = c.goldDocIds.length > 0;
   const honest = answerable ? !answer.refused : answer.refused;
   rows.push({
-    id: c.id, answerable, refused: answer.refused, rounds: round,
+    run, id: c.id, answerable, refused: answer.refused, rounds: round,
     errors: verdict.stats.errors, rules: verdict.issues.filter((i) => i.severity === "error").map((i) => i.rule),
     cost, honest,
   });
@@ -129,7 +139,15 @@ for (const c of cases) {
   const what = answerable ? (answer.refused ? "该答却拒答" : "作答") : (answer.refused ? "诚实拒答" : "该拒却硬答");
   console.log(`  ${mark} ${c.id} ${what}｜打回 ${round} 轮｜$${cost.toFixed(3)}${verdict.passed ? "" : `｜遗留 ${verdict.stats.errors} 错`}`);
 }
+allRows.push(...rows);
+if (repeat > 1) {
+  const a = rows.filter((r) => r.answerable), n = rows.filter((r) => !r.answerable);
+  const p = (x: number, y: number) => (y ? ((x / y) * 100).toFixed(1) : "—");
+  console.log(`   本轮：拒答诚实 ${p(n.filter((r) => r.refused).length, n.length)}%｜一遍过 ${p(a.filter((r) => r.rounds === 0 && r.errors === 0).length, a.length)}%\n`);
+}
+}
 
+const rows = allRows;
 const answerable = rows.filter((r) => r.answerable);
 const refusal = rows.filter((r) => !r.answerable);
 const pct = (a: number, b: number) => `${b ? ((a / b) * 100).toFixed(1) : "—"}%`;
@@ -152,7 +170,42 @@ for (const r of rows) for (const x of r.rules) byRule.set(x, (byRule.get(x) ?? 0
 if (byRule.size) {
   console.log(`   归因错误分布：${[...byRule].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}×${v}`).join("，")}`);
 }
-console.log(`   总成本         $${rows.reduce((s, r) => s + r.cost, 0).toFixed(3)}（${rows.length} 题）`);
+console.log(`   总成本         $${rows.reduce((s, r) => s + r.cost, 0).toFixed(3)}（${rows.length} 次作答）`);
+
+if (repeat > 1) {
+  // 逐轮指标的均值与标准差：波动本身就是结论
+  const perRun = Array.from({ length: repeat }, (_, i) => {
+    const rs = rows.filter((r) => r.run === i + 1);
+    const a = rs.filter((r) => r.answerable), n = rs.filter((r) => !r.answerable);
+    return {
+      honest: n.length ? n.filter((r) => r.refused).length / n.length : 1,
+      clean: a.length ? a.filter((r) => r.rounds === 0 && r.errors === 0).length / a.length : 1,
+    };
+  });
+  const stat = (xs: number[]) => {
+    const m = xs.reduce((x, y) => x + y, 0) / xs.length;
+    const sd = Math.sqrt(xs.reduce((s2, x) => s2 + (x - m) ** 2, 0) / xs.length);
+    return `${(m * 100).toFixed(1)}% ± ${(sd * 100).toFixed(1)}`;
+  };
+  console.log(`\n📈 ${repeat} 轮稳定性`);
+  console.log(`   拒答诚实率     ${stat(perRun.map((r) => r.honest))}`);
+  console.log(`   一遍过率       ${stat(perRun.map((r) => r.clean))}`);
+
+  // 逐题一致性：哪些题在不同轮次里表现不一样，才是真正要盯的
+  const flaky: string[] = [];
+  for (const c of cases) {
+    const rs = rows.filter((r) => r.id === c.id);
+    if (rs.length < 2) continue;
+    const honestSet = new Set(rs.map((r) => r.honest));
+    const cleanSet = new Set(rs.map((r) => r.rounds === 0 && r.errors === 0));
+    if (honestSet.size > 1 || cleanSet.size > 1) {
+      flaky.push(`${c.id}（诚实 ${rs.filter((r) => r.honest).length}/${rs.length}，一遍过 ${rs.filter((r) => r.rounds === 0 && r.errors === 0).length}/${rs.length}）`);
+    }
+  }
+  console.log(flaky.length
+    ? `   ⚠️ 表现不稳定的题：${flaky.join("，")}\n      这些题的成绩取决于运气——它们才是下一步该加固的地方。`
+    : `   ✅ 所有题在 ${repeat} 轮中表现一致（无抖动）`);
+}
 
 mkdirSync("output", { recursive: true });
 writeFileSync("output/eval-answer.json", JSON.stringify(rows, null, 2));

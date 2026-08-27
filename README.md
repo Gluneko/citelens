@@ -64,8 +64,9 @@ pnpm sweep -- --no-vec        # 只比 BM25，秒出
 cp .env.example .env          # 只有生成层需要 API key
 pnpm ask "玄武岩的二氧化硅含量是多少？"          # 检索→生成带出处的回答→归因校验→定向打回
 pnpm calibrate                # 拒答阈值校准（结论：相关性≠答案在不在里面，阈值不可靠）
-pnpm eval:answer -- --refusal # 生成层评测：只跑拒答题（约 $1）
-pnpm eval:answer              # 生成层评测：全部 24 题（约 $4）
+pnpm eval:answer -- --refusal # 生成层评测：只跑 9 道拒答题（约 $1.5）
+pnpm eval:answer              # 生成层评测：全部 28 题跑 1 轮（约 $5）
+pnpm eval:answer -- --repeat 3  # 跑 3 轮报均值±方差（一次满分不叫基线）
 
 pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问维基的网络）
 ```
@@ -102,7 +103,8 @@ pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问�
 - [x] Day 3：RRF 混合召回 + cross-encoder 重排 + 候选池召回率（漏斗两段分开量）
 - [x] Day 4：归因校验器（四条铁律）+ 结构化回答 + 定向打回
 - [x] Day 4 余项：5 道对抗拒答题 + 拒答阈值校准 + 生成层评测（诚实率/一遍过率）
-- [ ] Day 4 遗留：向量库选型（暴力 vs HNSW）+ 重复采样看方差
+- [x] Day 4 加固：4 道「半知半解」型对抗题 + 重复采样与逐题一致性
+- [ ] Day 4 遗留：向量库选型（暴力 vs HNSW）
 - [ ] Day 5：查询改写 / HyDE / 会话式指代消解 + 图谱增强 + 评测收口
 
 ## 边界声明
