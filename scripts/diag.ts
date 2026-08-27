@@ -1,7 +1,8 @@
 /**
  * 单题诊断：这道题为什么失手？
  *
- * 用法：pnpm diag g12
+ * 用法：pnpm diag g12                                  只看两路原始召回
+ *       pnpm diag g12 --mode vector --rerank           跑完整流水线，看精排最终挑了什么
  *
  * （名字别叫 why——pnpm 有同名内置命令，会把脚本挡掉且静默无输出。踩过。）
  *
@@ -14,10 +15,15 @@ import { loadGold } from "../src/eval/gold.js";
 import { buildBm25 } from "../src/retrieve/bm25.js";
 import { LocalEmbedder } from "../src/retrieve/embed.js";
 import { tokenize } from "../src/retrieve/tokenize.js";
+import { RetrievalPipeline, type RetrieveMode } from "../src/retrieve/pipeline.js";
+import { CrossEncoderReranker } from "../src/retrieve/rerank.js";
 import { unpackVectors, VectorIndex, type VectorStoreFile } from "../src/retrieve/vector.js";
 import type { Chunk } from "../src/types.js";
 
-const id = process.argv.slice(2).filter((a) => a !== "--")[0];
+const rawArgs = process.argv.slice(2).filter((a) => a !== "--");
+const id = rawArgs.find((a) => !a.startsWith("--"));
+const argOf = (n: string) => { const i = rawArgs.indexOf(`--${n}`); return i >= 0 ? rawArgs[i + 1] : undefined; };
+const wantPipeline = rawArgs.includes("--rerank") || rawArgs.includes("--mode");
 if (!id) { console.error("用法：pnpm diag g12"); process.exit(1); }
 
 const c = loadGold().find((x) => x.id === id);
@@ -91,4 +97,45 @@ if (existsSync(VEC)) {
   console.log(`   （余弦分数挤在一个很窄的区间里，是向量检索的通病——Day 4 讲拒答阈值时会用到这个观察）`);
 } else {
   console.log(`\n（未找到 ${VEC}，跳过向量诊断；先跑 pnpm vectors）`);
+}
+
+// ---------- 完整流水线诊断：精排到底挑了什么 ----------
+if (wantPipeline) {
+  if (!existsSync(VEC)) {
+    console.log("\n（跑流水线需要向量，先 pnpm vectors）");
+  } else {
+    const file = JSON.parse(readFileSync(VEC, "utf-8")) as VectorStoreFile;
+    const vecs = unpackVectors(file);
+    const vi = new VectorIndex(file.model, file.dim);
+    for (const x of chunks) { const v = vecs.get(x.id); if (v) vi.add(x, v); }
+    const emb = new LocalEmbedder(file.model);
+    const useRerank = rawArgs.includes("--rerank");
+    const pipe = new RetrievalPipeline(
+      { bm25: bm, vector: vi, embedder: emb, reranker: useRerank ? new CrossEncoderReranker() : undefined },
+      {
+        mode: (argOf("mode") ?? "hybrid") as RetrieveMode,
+        poolSize: Number(argOf("pool") ?? 50),
+        topK: Number(argOf("top") ?? 5),
+        guarantee: Number(argOf("guarantee") ?? 15),
+        rerankTop: Number(argOf("rerank-top") ?? 0),
+      },
+    );
+    const r = await pipe.search(c.question);
+    console.log(`\n🎯 ${pipe.label} 最终前 ${r.hits.length}`);
+    for (const [i, h] of r.hits.entries()) {
+      const from = r.liftedFrom ? `（候选第 ${r.liftedFrom[i]} 位）` : "";
+      const hasFact = must.filter((m) => (h.context ?? h.text).includes(m));
+      const flag = hasFact.length ? ` ✅含「${hasFact.join("、")}」` : "";
+      console.log(`   ${i + 1}. ${h.id}${from}${flag}`);
+      console.log(`      ${(h.context ?? h.text).slice(0, 80).replace(/\n/g, " ")}…`);
+    }
+    const poolIdx = r.pool.findIndex((x) => answerChunks.some((a) => a.id === x.id));
+    console.log(`\n   答案片段在候选池第 ${poolIdx < 0 ? "未进池" : poolIdx + 1} 位｜最终结果里${
+      r.hits.some((h) => answerChunks.some((a) => a.id === h.id)) ? "在" : "不在"
+    }`);
+    if (poolIdx >= 0 && !r.hits.some((h) => answerChunks.some((a) => a.id === h.id))) {
+      console.log("   → 召回带进来了、精排没选上：这是【排序问题】，不是召回问题。");
+      console.log("     若前 5 名本身就能回答这个问题，那多半是金标准太窄；若不能，就是精排判错。");
+    }
+  }
 }
