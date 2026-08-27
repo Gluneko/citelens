@@ -80,7 +80,29 @@ export class LocalEmbedder implements Embedder {
 
   private async ensure() {
     if (this.pipe) return this.pipe;
-    const { pipeline } = await import("@huggingface/transformers");
+    let pipeline: any;
+    try {
+      ({ pipeline } = await import("@huggingface/transformers"));
+    } catch (e) {
+      // transformers.js 在 import 阶段就加载原生后端，这里失败说明二进制与当前
+      // 「平台 × 架构」不匹配——此时任何 device 选项都来不及生效，只能换环境。
+      const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
+      throw new Error(
+        [
+          `加载 embedding 后端失败：${msg}`,
+          `当前环境 ${process.platform}/${process.arch} · Node ${process.version}`,
+          "",
+          "onnxruntime-node 的新版本不再提供 darwin/x64 预编译二进制。",
+          "若你的 Mac 是 Apple Silicon 却装了 x64 版 Node（Rosetta），有两条路：",
+          "  A. 根治——换 arm64 版 Node（顺带全局提速）：",
+          "     source ~/.nvm/nvm.sh && nvm install 22 --arch=arm64 && nvm alias default 22",
+          "     然后 rm -rf node_modules && pnpm install",
+          "  B. 应急——把 onnxruntime-node 降到仍带 darwin/x64 的 1.22.0：",
+          '     在 package.json 加 "pnpm": { "overrides": { "onnxruntime-node": "1.22.0" } }',
+          "     然后 rm -rf node_modules && pnpm install",
+        ].join("\n"),
+      );
+    }
     const first = this.preferred();
     try {
       this.pipe = await pipeline("feature-extraction", this.name, { dtype: "q8", device: first });
