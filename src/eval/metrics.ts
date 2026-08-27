@@ -45,6 +45,28 @@ export function summarize(
   };
 }
 
+/**
+ * 事实级召回（answer-supported recall）——比文档级判定更本质的一把尺子。
+ *
+ * 为什么需要它：文档级判定假设"正确答案只在这一篇里"。语料一旦扩大，
+ * 这个假设就破了——问"岩浆慢慢冷却会形成什么石头"，维基的《火成岩》条目
+ * 同样是正确答案，只是它没被写进金标准。此时检索没错，是出题人的假设过时了。
+ *
+ * 事实级判定绕开了这个问题：不问"捞到了哪篇"，只问
+ * 【捞回来的这几段文字里，回答这道题所需的关键事实齐不齐】。
+ * 这才是真正预测生成层能不能答对的指标——模型只能用你喂给它的片段作答。
+ */
+export function factRecall(texts: string[], mustContain: string[]): number {
+  if (mustContain.length === 0) return 1;
+  const joined = texts.join("\n");
+  return mustContain.filter((m) => joined.includes(m)).length / mustContain.length;
+}
+
+/** 关键事实是否"一条不缺"——比平均值更严格，也更接近真实体验 */
+export function factComplete(texts: string[], mustContain: string[]): 0 | 1 {
+  return factRecall(texts, mustContain) === 1 ? 1 : 0;
+}
+
 /** 把 chunk 级检索结果压成文档级排名（同一篇文档多次命中只保留最靠前的一次） */
 export function toDocRanking(chunkDocIds: string[]): RankedDocIds {
   const seen = new Set<string>();

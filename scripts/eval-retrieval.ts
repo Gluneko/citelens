@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { loadCorpus } from "../src/corpus/load.js";
 import { loadGold } from "../src/eval/gold.js";
-import { summarize, toDocRanking } from "../src/eval/metrics.js";
+import { factComplete, factRecall, summarize, toDocRanking } from "../src/eval/metrics.js";
 import { buildBm25 } from "../src/retrieve/bm25.js";
 import type { Chunk } from "../src/types.js";
 
@@ -42,6 +42,21 @@ const ms = performance.now() - t0;
 
 const s = summarize(results.map((r) => ({ ranked: r.ranked, gold: r.case.goldDocIds })));
 
+// 事实级：把 top5 片段拼起来，看回答这道题所需的关键事实齐不齐
+const factCases = gold.filter((c) => (c.mustContain?.length ?? 0) > 0);
+const factScores = results
+  .filter((r) => (r.case.mustContain?.length ?? 0) > 0)
+  .map((r) => ({
+    id: r.case.id,
+    recall: factRecall(r.hits.slice(0, 5).map((h) => h.chunk.text), r.case.mustContain!),
+    complete: factComplete(r.hits.slice(0, 5).map((h) => h.chunk.text), r.case.mustContain!),
+    missing: r.case.mustContain!.filter(
+      (m) => !r.hits.slice(0, 5).map((h) => h.chunk.text).join("\n").includes(m),
+    ),
+  }));
+const factAvg = factScores.reduce((x, y) => x + y.recall, 0) / (factScores.length || 1);
+const factCompleteRate = factScores.reduce((x, y) => x + y.complete, 0) / (factScores.length || 1);
+
 if (verbose) {
   for (const r of results) {
     const gold0 = r.case.goldDocIds;
@@ -65,7 +80,16 @@ console.log(`   recall@3  ${(s.recall[3]! * 100).toFixed(1)}%`);
 console.log(`   recall@5  ${(s.recall[5]! * 100).toFixed(1)}%   ← 基线数字，记住它`);
 console.log(`   recall@10 ${(s.recall[10]! * 100).toFixed(1)}%`);
 console.log(`   MRR@10    ${s.mrr.toFixed(3)}`);
-console.log(`   耗时      ${ms.toFixed(0)}ms（${(ms / gold.length).toFixed(1)}ms/题）`);
+
+console.log(`\n🎯 事实层成绩（top5 片段拼起来，关键事实齐不齐；${factCases.length} 题有关键事实标注）`);
+console.log(`   事实召回率   ${(factAvg * 100).toFixed(1)}%     ← 平均捞回了多少比例的关键事实`);
+console.log(`   一条不缺率   ${(factCompleteRate * 100).toFixed(1)}%     ← 真正决定生成层能否答对`);
+const broken = factScores.filter((f) => f.complete === 0);
+if (broken.length) {
+  console.log(`   缺事实的题：`);
+  for (const f of broken) console.log(`     ${f.id} 缺「${f.missing.join("、")}」`);
+}
+console.log(`\n   耗时      ${ms.toFixed(0)}ms（${(ms / gold.length).toFixed(1)}ms/题）`);
 
 const refuse = results.find((r) => r.case.goldDocIds.length === 0);
 if (refuse) {
