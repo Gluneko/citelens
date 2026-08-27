@@ -12,7 +12,8 @@
     "vectors": "node --import tsx scripts/build-vectors.ts",
     "sweep": "node --import tsx scripts/sweep-chunking.ts",
     "diag": "node --import tsx scripts/diag.ts",
-    "ask": "node --env-file-if-exists=.env --import tsx scripts/ask.ts"
+    "ask": "node --env-file-if-exists=.env --import tsx scripts/ask.ts",
+    "calibrate": "node --import tsx scripts/calibrate-refusal.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -13,8 +13,9 @@ test("金标准集自洽（docId 存在、关键事实确实在标注文档里�
 
 test("题量与题型覆盖", () => {
   const cases = loadGold();
-  assert.equal(cases.length, 20);
-  assert.equal(cases.filter((c) => c.goldDocIds.length === 0).length, 1, "必须有且仅有 1 道拒答题");
+  assert.equal(cases.length, 24);
+  assert.equal(cases.filter((c) => c.goldDocIds.length === 0).length, 5,
+    "拒答题至少要有一组，单样本无法校准阈值");
   assert.ok(cases.filter((c) => c.goldDocIds.length > 1).length >= 1, "至少 1 道跨文档题");
 });
 
