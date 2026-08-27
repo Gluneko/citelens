@@ -55,6 +55,12 @@ export interface PipelineResult {
   pool: Chunk[];
   /** 若启用精排，记录每个最终结果精排前的名次 */
   liftedFrom?: number[];
+  /**
+   * 若启用精排，记录每个最终结果的精排分数。
+   * cross-encoder 的分数分布远比余弦分散，因此它是【比余弦好得多的拒答判据】——
+   * 余弦把相关与无关都挤在 0.5～0.6，精排分数则能拉开好几个数量级。
+   */
+  scores?: number[];
 }
 
 export class RetrievalPipeline {
@@ -73,7 +79,12 @@ export class RetrievalPipeline {
     const n = this.opts.rerankTop && this.opts.rerankTop > 0 ? this.opts.rerankTop : pool.length;
     const toRank = pool.slice(0, n);
     const ranked = await rerank(this.deps.reranker, query, toRank, (c) => c.context ?? c.text, topK);
-    return { hits: ranked.map((r) => r.item), pool, liftedFrom: ranked.map((r) => r.before) };
+    return {
+      hits: ranked.map((r) => r.item),
+      pool,
+      liftedFrom: ranked.map((r) => r.before),
+      scores: ranked.map((r) => r.score),
+    };
   }
 
   private async recall(query: string): Promise<Chunk[]> {

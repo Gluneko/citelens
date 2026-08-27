@@ -61,6 +61,10 @@ pnpm diag g12                 # 单题诊断：答案片段排第几、两路各
 pnpm sweep                    # 四种切分策略 × 两路检索的 A/B（几分钟）
 pnpm sweep -- --no-vec        # 只比 BM25，秒出
 
+cp .env.example .env          # 只有生成层需要 API key
+pnpm ask "玄武岩的二氧化硅含量是多少？"          # 检索→生成带出处的回答→归因校验→定向打回
+pnpm ask "华南某矿区金平均品位" -- --refuse-below 0   # 用精排分数做拒答阈值
+
 pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问维基的网络）
 ```
 
@@ -94,7 +98,8 @@ pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问�
 - [x] Day 1：手写 BM25（倒排索引 / TF-IDF / 中文分词）+ recall@k / MRR 评测 → **recall@5 基线**
 - [x] Day 2：向量检索（本地 bge-small-zh，暴力余弦）+ 四种切分策略 A/B + 单题诊断工具
 - [x] Day 3：RRF 混合召回 + cross-encoder 重排 + 候选池召回率（漏斗两段分开量）
-- [ ] Day 4：向量库选型（暴力 vs HNSW）+ 归因校验器 + 对抗集
+- [x] Day 4：归因校验器（四条铁律）+ 结构化回答 + 定向打回
+- [ ] Day 4 余项：向量库选型（暴力 vs HNSW）+ 归因对抗评测集
 - [ ] Day 5：查询改写 / HyDE / 会话式指代消解 + 图谱增强 + 评测收口
 
 ## 边界声明
