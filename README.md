@@ -51,7 +51,9 @@ pnpm vectors                  # 给所有 chunk 算向量（首次需下模型 ~
 # 强制指定：CITELENS_DEVICE=wasm pnpm vectors
 # Apple Silicon 上若装的是 x64 版 Node（Rosetta），原生后端无 darwin/x64 二进制，
 # 换 arm64 版 Node 可显著提速：nvm install 22 --arch=arm64
-pnpm eval -- --mode both --verbose   # BM25 与向量并排对照，逐题看谁赢
+pnpm eval -- --mode hybrid           # 两路 RRF 融合召回
+pnpm eval -- --mode hybrid --rerank  # 融合召回 + cross-encoder 精排
+pnpm eval -- --compare --verbose     # 四种配置一次跑完并排对照
 pnpm eval -- --k1 1.2 --b 0.5        # BM25 调参
 
 pnpm diag g12                 # 单题诊断：答案片段排第几、两路各捞回了什么
@@ -91,7 +93,7 @@ pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问�
 - [x] Day 0：语料 + 定长切分（保留字符区间）+ 20 题金标准 + case lint
 - [x] Day 1：手写 BM25（倒排索引 / TF-IDF / 中文分词）+ recall@k / MRR 评测 → **recall@5 基线**
 - [x] Day 2：向量检索（本地 bge-small-zh，暴力余弦）+ 四种切分策略 A/B + 单题诊断工具
-- [ ] Day 3：RRF 混合召回 + cross-encoder 重排 → NDCG@5 三档对照
+- [x] Day 3：RRF 混合召回 + cross-encoder 重排 + 候选池召回率（漏斗两段分开量）
 - [ ] Day 4：向量库选型（暴力 vs HNSW）+ 归因校验器 + 对抗集
 - [ ] Day 5：查询改写 / HyDE / 会话式指代消解 + 图谱增强 + 评测收口
 
