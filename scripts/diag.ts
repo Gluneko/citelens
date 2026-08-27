@@ -130,9 +130,14 @@ if (wantPipeline) {
       console.log(`      ${(h.context ?? h.text).slice(0, 80).replace(/\n/g, " ")}…`);
     }
     const poolIdx = r.pool.findIndex((x) => answerChunks.some((a) => a.id === x.id));
-    console.log(`\n   答案片段在候选池第 ${poolIdx < 0 ? "未进池" : poolIdx + 1} 位｜最终结果里${
+    const rtop = Number(argOf("rerank-top") ?? 0);
+    console.log(`\n   答案片段在候选池【片段级】第 ${poolIdx < 0 ? "未进池" : poolIdx + 1} 位｜最终结果里${
       r.hits.some((h) => answerChunks.some((a) => a.id === h.id)) ? "在" : "不在"
     }`);
+    if (poolIdx >= 0 && rtop > 0 && poolIdx >= rtop) {
+      console.log(`   ⚠️ 它排在精排窗口（前 ${rtop} 条）之外——精排从未见过它。`);
+      console.log(`      去掉 --rerank-top 再跑一次，才是对精排能力的公平检验。`);
+    }
     if (poolIdx >= 0 && !r.hits.some((h) => answerChunks.some((a) => a.id === h.id))) {
       console.log("   → 召回带进来了、精排没选上：这是【排序问题】，不是召回问题。");
       console.log("     若前 5 名本身就能回答这个问题，那多半是金标准太窄；若不能，就是精排判错。");

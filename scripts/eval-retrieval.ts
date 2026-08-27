@@ -95,9 +95,14 @@ if (verbose) {
         continue;
       }
       const mark = o.rank === 0 ? "✅" : o.rank > 0 && o.rank < 5 ? "🟡" : "❌";
-      const pool = o.poolRank < 0 ? "候选池也没有" : `候选池第 ${o.poolRank + 1}`;
+      const pool = o.poolRank < 0
+        ? "候选池也没有"
+        : `候选池文档第 ${o.poolRank + 1}/片段第 ${o.poolRankChunk + 1}`;
+      const cut = rerankTop > 0 && o.poolRankChunk >= rerankTop
+        ? `｜⚠️ 片段第 ${o.poolRankChunk + 1} 位 > 精排前 ${rerankTop}，根本没进精排`
+        : "";
       const lift = o.liftedFrom ? `｜精排把前 ${topK} 名从候选 ${o.liftedFrom.join("/")} 位顶上来` : "";
-      console.log(`  ${mark} ${o.case.id} 第 ${o.rank < 0 ? ">" + topK : o.rank + 1} 名（${pool}）${lift}`);
+      console.log(`  ${mark} ${o.case.id} 第 ${o.rank < 0 ? ">" + topK : o.rank + 1} 名（${pool}）${cut}${lift}`);
       if (o.rank !== 0) console.log(`      ${o.case.question}`);
     }
   }

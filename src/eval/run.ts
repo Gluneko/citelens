@@ -17,8 +17,18 @@ export interface CaseOutcome {
   ranked: string[];
   /** 正确文档在最终结果里的名次，-1 表示未命中 */
   rank: number;
-  /** 正确文档在候选池里的名次，-1 表示召回阶段就漏了 */
+  /**
+   * 正确文档在候选池里的【文档级】名次，-1 表示召回阶段就漏了。
+   * 注意：这是把多个 chunk 压成一篇之后的名次。
+   */
   poolRank: number;
+  /**
+   * 正确片段在候选池里的【chunk 级】名次。
+   * 必须与 poolRank 分开报——rerankTop 是按 chunk 数截断的，
+   * 用文档级名次去判断"有没有被精排看到"会得出完全错误的结论。
+   * （实弹教训：文档级第 17、chunk 级第 43，rerankTop=20 时其实压根没进精排。）
+   */
+  poolRankChunk: number;
   liftedFrom?: number[];
 }
 
@@ -34,6 +44,7 @@ export async function runCases(pipeline: RetrievalPipeline, gold: GoldCase[]): P
       ranked,
       rank: ranked.findIndex((d) => c.goldDocIds.includes(d)),
       poolRank: toDocRanking(r.pool.map((h) => h.docId)).findIndex((d) => c.goldDocIds.includes(d)),
+      poolRankChunk: r.pool.findIndex((h) => c.goldDocIds.includes(h.docId)),
       liftedFrom: r.liftedFrom,
     });
   }
