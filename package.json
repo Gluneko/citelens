@@ -8,11 +8,15 @@
     "test": "node --import tsx --test src/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "fetch:wiki": "node --import tsx scripts/fetch-wiki.ts",
-    "eval": "node --import tsx scripts/eval-retrieval.ts"
+    "eval": "node --import tsx scripts/eval-retrieval.ts",
+    "vectors": "node --import tsx scripts/build-vectors.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
   }
 }

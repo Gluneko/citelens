@@ -44,9 +44,11 @@ RAG 公认的难点是"模型会不会编"。这个问题有一半可以确定�
 pnpm install
 pnpm test      # 无需网络与 API key
 pnpm chunks    # 语料 → data/chunks.jsonl，并打印长度分布
-pnpm eval      # 检索层评测：recall@k / MRR（零网络零 API，1 秒内跑完）
-pnpm eval -- --verbose        # 逐题看赢在哪、输在哪
-pnpm eval -- --k1 1.2 --b 0.5 # 调参对比
+pnpm eval      # 检索层评测：recall@k / MRR / 事实层（零网络零 API）
+
+pnpm vectors                  # 给所有 chunk 算向量（首次需下模型 ~100MB）
+pnpm eval -- --mode both --verbose   # BM25 与向量并排对照，逐题看谁赢
+pnpm eval -- --k1 1.2 --b 0.5        # BM25 调参
 
 pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问维基的网络）
 ```
@@ -79,7 +81,7 @@ pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问�
 
 - [x] Day 0：语料 + 定长切分（保留字符区间）+ 20 题金标准 + case lint
 - [x] Day 1：手写 BM25（倒排索引 / TF-IDF / 中文分词）+ recall@k / MRR 评测 → **recall@5 基线**
-- [ ] Day 2：向量检索（本地 bge-small-zh）+ 四种切分策略 A/B
+- [ ] Day 2：向量检索（本地 bge-small-zh，暴力余弦）+ 四种切分策略 A/B
 - [ ] Day 3：RRF 混合召回 + cross-encoder 重排 → NDCG@5 三档对照
 - [ ] Day 4：向量库选型（暴力 vs HNSW）+ 归因校验器 + 对抗集
 - [ ] Day 5：查询改写 / HyDE / 会话式指代消解 + 图谱增强 + 评测收口

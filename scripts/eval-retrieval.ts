@@ -1,102 +1,175 @@
 /**
- * 检索层评测：把 20 道金标准题跑一遍，报出 recall@k 与 MRR。
+ * 检索层评测：把 20 道金标准题跑一遍，报 recall@k / MRR / 事实层成绩。
  *
- * 用法：pnpm eval                     默认参数
- *       pnpm eval -- --k1 1.2 --b 0.5 调参对比
- *       pnpm eval -- --verbose        逐题打印，看清楚每道题赢在哪、输在哪
- *
- * 全程零网络零 API：BM25 是纯统计，跑一次不到一秒——所以你可以放心地反复调参。
+ * 用法：
+ *   pnpm eval                      默认 BM25
+ *   pnpm eval -- --mode vector     向量检索（需先 pnpm vectors）
+ *   pnpm eval -- --mode both       两路并排对照 ← Day 2 的重头戏
+ *   pnpm eval -- --verbose         逐题详情
+ *   pnpm eval -- --k1 1.2 --b 0.5  BM25 调参
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { loadCorpus } from "../src/corpus/load.js";
 import { loadGold } from "../src/eval/gold.js";
 import { factComplete, factRecall, summarize, toDocRanking } from "../src/eval/metrics.js";
 import { buildBm25 } from "../src/retrieve/bm25.js";
-import type { Chunk } from "../src/types.js";
+import { LocalEmbedder } from "../src/retrieve/embed.js";
+import { unpackVectors, VectorIndex, type VectorStoreFile } from "../src/retrieve/vector.js";
+import type { Chunk, GoldCase } from "../src/types.js";
 
 const argv = process.argv.slice(2).filter((a) => a !== "--");
-const flag = (name: string, dflt: number) => {
+const opt = (name: string) => {
   const i = argv.indexOf(`--${name}`);
-  return i >= 0 && argv[i + 1] ? Number(argv[i + 1]) : dflt;
+  return i >= 0 ? argv[i + 1] : undefined;
 };
-const k1 = flag("k1", 1.5);
-const b = flag("b", 0.75);
+const k1 = Number(opt("k1") ?? 1.5);
+const b = Number(opt("b") ?? 0.75);
 const verbose = argv.includes("--verbose");
+const mode = (opt("mode") ?? "bm25") as "bm25" | "vector" | "both";
+
+const VEC = "data/index/vectors.json";
+if (mode !== "bm25" && !existsSync(VEC)) {
+  console.error(`❌ 找不到 ${VEC}，请先跑：pnpm vectors`);
+  process.exit(1);
+}
 
 const chunks: Chunk[] = readFileSync("data/chunks.jsonl", "utf-8")
   .split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l) as Chunk);
 const docs = loadCorpus();
 const gold = loadGold();
-const index = buildBm25(chunks, { k1, b });
 
-console.log(`🔎 BM25 检索评测 | 文档 ${docs.length} 篇 / chunk ${index.size} 个 / 词表 ${index.vocabSize} 词`);
-console.log(`   参数 k1=${k1} b=${b}\n`);
+interface Retrieved { chunks: Chunk[]; scores: number[] }
+type Runner = (q: string) => Promise<Retrieved>;
 
-const t0 = performance.now();
-const results = gold.map((c) => {
-  const hits = index.search(c.question, 10);
-  const ranked = toDocRanking(hits.map((h) => h.chunk.docId));
-  return { case: c, hits, ranked };
-});
-const ms = performance.now() - t0;
+const runners: Array<{ label: string; run: Runner }> = [];
 
-const s = summarize(results.map((r) => ({ ranked: r.ranked, gold: r.case.goldDocIds })));
+if (mode === "bm25" || mode === "both") {
+  const index = buildBm25(chunks, { k1, b });
+  console.log(`🔎 BM25｜chunk ${index.size}｜词表 ${index.vocabSize} 词｜k1=${k1} b=${b}`);
+  runners.push({
+    label: "BM25",
+    run: async (q) => {
+      const hits = index.search(q, 10);
+      return { chunks: hits.map((h) => h.chunk), scores: hits.map((h) => h.score) };
+    },
+  });
+}
 
-// 事实级：把 top5 片段拼起来，看回答这道题所需的关键事实齐不齐
-const factCases = gold.filter((c) => (c.mustContain?.length ?? 0) > 0);
-const factScores = results
-  .filter((r) => (r.case.mustContain?.length ?? 0) > 0)
-  .map((r) => ({
-    id: r.case.id,
-    recall: factRecall(r.hits.slice(0, 5).map((h) => h.chunk.text), r.case.mustContain!),
-    complete: factComplete(r.hits.slice(0, 5).map((h) => h.chunk.text), r.case.mustContain!),
-    missing: r.case.mustContain!.filter(
-      (m) => !r.hits.slice(0, 5).map((h) => h.chunk.text).join("\n").includes(m),
-    ),
-  }));
-const factAvg = factScores.reduce((x, y) => x + y.recall, 0) / (factScores.length || 1);
-const factCompleteRate = factScores.reduce((x, y) => x + y.complete, 0) / (factScores.length || 1);
+if (mode === "vector" || mode === "both") {
+  const file = JSON.parse(readFileSync(VEC, "utf-8")) as VectorStoreFile;
+  const vecs = unpackVectors(file);
+  const vindex = new VectorIndex(file.model, file.dim);
+  for (const c of chunks) {
+    const v = vecs.get(c.id);
+    if (v) vindex.add(c, v);
+  }
+  if (vindex.size !== chunks.length) {
+    console.error(`⚠️  向量缓存只覆盖 ${vindex.size}/${chunks.length} 个 chunk——切分参数改过？请重跑 pnpm vectors`);
+  }
+  const embedder = new LocalEmbedder(file.model);
+  console.log(`🧠 向量｜${file.model}｜${vindex.size} 条 × ${file.dim} 维`);
+  runners.push({
+    label: "向量",
+    run: async (q) => {
+      const hits = await vindex.search(embedder, q, 10);
+      return { chunks: hits.map((h) => h.chunk), scores: hits.map((h) => h.score) };
+    },
+  });
+}
 
-if (verbose) {
-  for (const r of results) {
-    const gold0 = r.case.goldDocIds;
-    if (gold0.length === 0) {
-      const top = r.hits[0];
-      console.log(`  🚫 ${r.case.id} 拒答题｜最高分 ${top ? top.score.toFixed(2) : "0"}（${top?.chunk.docId ?? "无命中"}）`);
+console.log(`📚 文档 ${docs.length} 篇\n`);
+
+interface CaseResult { case: GoldCase; rank: number; ranked: string[]; res: Retrieved }
+const byRunner = new Map<string, CaseResult[]>();
+
+for (const r of runners) {
+  const out: CaseResult[] = [];
+  const t0 = performance.now();
+  for (const c of gold) {
+    const res = await r.run(c.question);
+    const ranked = toDocRanking(res.chunks.map((x) => x.docId));
+    out.push({ case: c, ranked, res, rank: ranked.findIndex((d) => c.goldDocIds.includes(d)) });
+  }
+  const ms = performance.now() - t0;
+  byRunner.set(r.label, out);
+  console.log(`⏱  ${r.label}：${ms.toFixed(0)}ms（${(ms / gold.length).toFixed(1)}ms/题）`);
+}
+
+function report(label: string, rs: CaseResult[]) {
+  const s = summarize(rs.map((r) => ({ ranked: r.ranked, gold: r.case.goldDocIds })));
+  const facts = rs.filter((r) => (r.case.mustContain?.length ?? 0) > 0).map((r) => {
+    const texts = r.res.chunks.slice(0, 5).map((c) => c.text);
+    return {
+      id: r.case.id,
+      recall: factRecall(texts, r.case.mustContain!),
+      complete: factComplete(texts, r.case.mustContain!),
+      missing: r.case.mustContain!.filter((m) => !texts.join("\n").includes(m)),
+    };
+  });
+  const fAvg = facts.reduce((x, y) => x + y.recall, 0) / (facts.length || 1);
+  const fComp = facts.reduce((x, y) => x + y.complete, 0) / (facts.length || 1);
+  const refuse = rs.find((r) => r.case.goldDocIds.length === 0);
+  const normalTop = rs.filter((r) => r.case.goldDocIds.length > 0).map((r) => r.res.scores[0] ?? 0);
+  const avgTop = normalTop.reduce((x, y) => x + y, 0) / (normalTop.length || 1);
+  return {
+    label, s, fAvg, fComp,
+    broken: facts.filter((f) => f.complete === 0),
+    refuseTop: refuse?.res.scores[0] ?? 0,
+    avgTop,
+  };
+}
+
+const reports = [...byRunner].map(([label, rs]) => report(label, rs));
+
+if (verbose && mode === "both") {
+  const [A, B] = [...byRunner.values()];
+  console.log("\n📋 逐题对照（名次越小越好，>10 表示前十未命中）");
+  console.log("   题号  BM25  向量   胜负   问题");
+  for (let i = 0; i < gold.length; i++) {
+    const c = gold[i]!;
+    const ra = A![i]!.rank, rb = B![i]!.rank;
+    if (c.goldDocIds.length === 0) {
+      console.log(`   ${c.id}    —     —    拒答题  最高分 BM25 ${A![i]!.res.scores[0]?.toFixed(2)} / 向量 ${B![i]!.res.scores[0]?.toFixed(3)}`);
       continue;
     }
-    const rank = r.ranked.findIndex((d) => gold0.includes(d));
-    const mark = rank === 0 ? "✅" : rank > 0 && rank < 5 ? "🟡" : "❌";
-    console.log(`  ${mark} ${r.case.id} 第 ${rank < 0 ? ">10" : rank + 1} 名｜${r.case.question}`);
-    console.log(`      期望 ${gold0.join("/")}｜实得 ${r.ranked.slice(0, 3).join(" > ")}`);
-    console.log(`      命中词 ${(r.hits[0]?.matched ?? []).join("、") || "（无）"}`);
+    const fmt = (r: number) => (r < 0 ? ">10" : String(r + 1)).padStart(4);
+    const win = ra === rb ? " 平手 " : (ra >= 0 && (rb < 0 || ra < rb)) ? "BM25赢" : "向量赢";
+    console.log(`   ${c.id} ${fmt(ra)}  ${fmt(rb)}   ${win}  ${c.question}`);
   }
-  console.log("");
+} else if (verbose) {
+  for (const [label, rs] of byRunner) {
+    console.log(`\n📋 ${label} 逐题`);
+    for (const r of rs) {
+      if (r.case.goldDocIds.length === 0) {
+        console.log(`  🚫 ${r.case.id} 拒答题｜最高分 ${r.res.scores[0]?.toFixed(3) ?? 0}`);
+        continue;
+      }
+      const mark = r.rank === 0 ? "✅" : r.rank > 0 && r.rank < 5 ? "🟡" : "❌";
+      console.log(`  ${mark} ${r.case.id} 第 ${r.rank < 0 ? ">10" : r.rank + 1} 名｜${r.case.question}`);
+      console.log(`      期望 ${r.case.goldDocIds.join("/")}｜实得 ${r.ranked.slice(0, 3).join(" > ")}`);
+    }
+  }
 }
 
-console.log("📊 检索层成绩（文档级判定，20 题中 19 题计分，1 题为拒答题）");
-console.log(`   recall@1  ${(s.recall[1]! * 100).toFixed(1)}%`);
-console.log(`   recall@3  ${(s.recall[3]! * 100).toFixed(1)}%`);
-console.log(`   recall@5  ${(s.recall[5]! * 100).toFixed(1)}%   ← 基线数字，记住它`);
-console.log(`   recall@10 ${(s.recall[10]! * 100).toFixed(1)}%`);
-console.log(`   MRR@10    ${s.mrr.toFixed(3)}`);
-
-console.log(`\n🎯 事实层成绩（top5 片段拼起来，关键事实齐不齐；${factCases.length} 题有关键事实标注）`);
-console.log(`   事实召回率   ${(factAvg * 100).toFixed(1)}%     ← 平均捞回了多少比例的关键事实`);
-console.log(`   一条不缺率   ${(factCompleteRate * 100).toFixed(1)}%     ← 真正决定生成层能否答对`);
-const broken = factScores.filter((f) => f.complete === 0);
-if (broken.length) {
-  console.log(`   缺事实的题：`);
-  for (const f of broken) console.log(`     ${f.id} 缺「${f.missing.join("、")}」`);
+console.log("\n📊 成绩对照");
+const pad = (s: string, n: number) => s.padEnd(n);
+console.log(`   ${pad("指标", 16)}${reports.map((r) => pad(r.label, 12)).join("")}`);
+const rows: Array<[string, (r: typeof reports[number]) => string]> = [
+  ["recall@1", (r) => `${(r.s.recall[1]! * 100).toFixed(1)}%`],
+  ["recall@3", (r) => `${(r.s.recall[3]! * 100).toFixed(1)}%`],
+  ["recall@5", (r) => `${(r.s.recall[5]! * 100).toFixed(1)}%`],
+  ["recall@10", (r) => `${(r.s.recall[10]! * 100).toFixed(1)}%`],
+  ["MRR@10", (r) => r.s.mrr.toFixed(3)],
+  ["事实召回率@5", (r) => `${(r.fAvg * 100).toFixed(1)}%`],
+  ["一条不缺率@5", (r) => `${(r.fComp * 100).toFixed(1)}%`],
+];
+for (const [name, fn] of rows) {
+  console.log(`   ${pad(name, 16)}${reports.map((r) => pad(fn(r), 12)).join("")}`);
 }
-console.log(`\n   耗时      ${ms.toFixed(0)}ms（${(ms / gold.length).toFixed(1)}ms/题）`);
 
-const refuse = results.find((r) => r.case.goldDocIds.length === 0);
-if (refuse) {
-  const top = refuse.hits[0];
-  const best = results.filter((r) => r.case.goldDocIds.length > 0)
-    .map((r) => r.hits[0]?.score ?? 0);
-  const avg = best.reduce((x, y) => x + y, 0) / (best.length || 1);
-  console.log(`\n🚫 拒答题体检：最高分 ${top ? top.score.toFixed(2) : "0"}，正常题平均最高分 ${avg.toFixed(2)}`);
-  console.log(`   两者差距就是 Day 4 拒答阈值的立足点——差距越大，"我不知道"越好判。`);
+for (const r of reports) {
+  if (r.broken.length) {
+    console.log(`\n   ${r.label} 缺事实的题：${r.broken.map((f) => `${f.id}（缺「${f.missing.join("、")}」）`).join("，")}`);
+  }
+  console.log(`   ${r.label} 拒答题体检：最高分 ${r.refuseTop.toFixed(3)}，正常题平均最高分 ${r.avgTop.toFixed(3)}，比值 ${(r.refuseTop / (r.avgTop || 1)).toFixed(2)}`);
 }
