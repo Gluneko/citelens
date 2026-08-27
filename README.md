@@ -47,6 +47,10 @@ pnpm chunks    # 语料 → data/chunks.jsonl，并打印长度分布
 pnpm eval      # 检索层评测：recall@k / MRR / 事实层（零网络零 API）
 
 pnpm vectors                  # 给所有 chunk 算向量（首次需下模型 ~100MB）
+# 后端自动选择：原生 onnxruntime-node 优先，缺二进制时回落 wasm
+# 强制指定：CITELENS_DEVICE=wasm pnpm vectors
+# Apple Silicon 上若装的是 x64 版 Node（Rosetta），原生后端无 darwin/x64 二进制，
+# 换 arm64 版 Node 可显著提速：nvm install 22 --arch=arm64
 pnpm eval -- --mode both --verbose   # BM25 与向量并排对照，逐题看谁赢
 pnpm eval -- --k1 1.2 --b 0.5        # BM25 调参
 

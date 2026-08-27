@@ -50,21 +50,49 @@ export function cosine(a: Float32Array, b: Float32Array): number {
 /**
  * 本地 embedding：transformers.js 在 Node 里跑 ONNX 模型，不联网、不花钱。
  * 首次运行会从 HuggingFace 下载模型（约 100MB），之后走本地缓存。
+ *
+ * 后端选择（实弹踩过的坑）：
+ *   cpu  —— onnxruntime-node 原生二进制，快，但只对特定「平台 × CPU 架构」组合提供预编译文件
+ *   wasm —— onnxruntime-web，慢几倍，但哪儿都能跑
+ * onnxruntime-node 新版已不再提供 darwin/x64 二进制。若你的 Mac 是 Apple Silicon
+ * 却装了 x64 版 Node（Rosetta 下运行），原生后端就会找不到文件——
+ * 此时自动回落到 wasm，并提示根治办法（换 arm64 Node）。
  */
+export type EmbedDevice = "auto" | "cpu" | "wasm";
+
 export class LocalEmbedder implements Embedder {
   readonly name: string;
   dim = 512; // bge-small-zh-v1.5 的向量维度，首次 embed 后按实际值校正
   private pipe: any = null;
+  private device: EmbedDevice;
 
-  constructor(name = "Xenova/bge-small-zh-v1.5") {
+  constructor(name = "Xenova/bge-small-zh-v1.5", device: EmbedDevice = "auto") {
     this.name = name;
+    this.device = (process.env.CITELENS_DEVICE as EmbedDevice) ?? device;
+  }
+
+  /** darwin + x64 = Rosetta 下的 Node，原生后端缺二进制，直接走 wasm 省得报错 */
+  private preferred(): "cpu" | "wasm" {
+    if (this.device !== "auto") return this.device;
+    if (process.platform === "darwin" && process.arch === "x64") return "wasm";
+    return "cpu";
   }
 
   private async ensure() {
     if (this.pipe) return this.pipe;
     const { pipeline } = await import("@huggingface/transformers");
-    this.pipe = await pipeline("feature-extraction", this.name, { dtype: "q8" });
-    return this.pipe;
+    const first = this.preferred();
+    try {
+      this.pipe = await pipeline("feature-extraction", this.name, { dtype: "q8", device: first });
+      if (first === "wasm") console.log("   ⚙️  后端 wasm（比原生慢几倍，但可用）");
+      return this.pipe;
+    } catch (e) {
+      if (first === "wasm") throw e;
+      console.log(`   ⚠️  原生后端不可用（${e instanceof Error ? e.message.split("\n")[0] : e}）`);
+      console.log("   ⚙️  回落到 wasm 后端继续");
+      this.pipe = await pipeline("feature-extraction", this.name, { dtype: "q8", device: "wasm" });
+      return this.pipe;
+    }
   }
 
   async embed(texts: string[]): Promise<Float32Array[]> {

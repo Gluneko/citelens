@@ -20,6 +20,11 @@ const chunks: Chunk[] = readFileSync("data/chunks.jsonl", "utf-8")
 
 const embedder = new LocalEmbedder();
 console.log(`🧠 模型 ${embedder.name}｜chunk ${chunks.length} 个`);
+console.log(`   运行环境 ${process.platform}/${process.arch} · Node ${process.version}`);
+if (process.platform === "darwin" && process.arch === "x64") {
+  console.log("   ℹ️  检测到 x64 版 Node。若你的 Mac 是 Apple Silicon，换 arm64 版 Node 可显著提速：");
+  console.log("      nvm install 22 --arch=arm64   （或从 nodejs.org 下 arm64 安装包）");
+}
 
 let cache = new Map<string, Float32Array>();
 if (existsSync(OUT)) {
