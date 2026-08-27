@@ -54,7 +54,8 @@ pnpm vectors                  # 给所有 chunk 算向量（首次需下模型 ~
 pnpm eval -- --mode both --verbose   # BM25 与向量并排对照，逐题看谁赢
 pnpm eval -- --k1 1.2 --b 0.5        # BM25 调参
 
-pnpm why g12                  # 单题诊断：答案片段到底排第几、分数差在哪
+pnpm diag g12                 # 单题诊断：答案片段排第几、两路各捞回了什么
+# （别叫 why——pnpm 有同名内置命令会静默挡掉脚本）
 pnpm sweep                    # 四种切分策略 × 两路检索的 A/B（几分钟）
 pnpm sweep -- --no-vec        # 只比 BM25，秒出
 

@@ -1,7 +1,9 @@
 /**
  * 单题诊断：这道题为什么失手？
  *
- * 用法：pnpm why g12
+ * 用法：pnpm diag g12
+ *
+ * （名字别叫 why——pnpm 有同名内置命令，会把脚本挡掉且静默无输出。踩过。）
  *
  * 它回答一个评测报告答不了的问题：
  * 「答案所在的那个片段，到底排第几？分数差在哪？」
@@ -16,7 +18,7 @@ import { unpackVectors, VectorIndex, type VectorStoreFile } from "../src/retriev
 import type { Chunk } from "../src/types.js";
 
 const id = process.argv.slice(2).filter((a) => a !== "--")[0];
-if (!id) { console.error("用法：pnpm why g12"); process.exit(1); }
+if (!id) { console.error("用法：pnpm diag g12"); process.exit(1); }
 
 const c = loadGold().find((x) => x.id === id);
 if (!c) { console.error(`没有这道题：${id}`); process.exit(1); }
@@ -28,10 +30,14 @@ console.log(`\n❓ ${c.id}｜${c.question}`);
 console.log(`   期望文档 ${c.goldDocIds.join("/") || "（拒答题）"}｜关键事实 ${(c.mustContain ?? []).join("、") || "（无）"}`);
 console.log(`   查询分词 ${tokenize(c.question).join(" / ")}`);
 
-// 找出"真正含答案"的片段：包含全部关键事实，或属于标注文档且含任一关键事实
+// 找出"真正含答案"的片段：属于标注文档且含关键事实
 const must = c.mustContain ?? [];
 const answerChunks = chunks.filter(
   (x) => c.goldDocIds.includes(x.docId) && must.some((m) => x.text.includes(m)),
+);
+// 全库里还有谁提到了同样的关键事实——语料一大，"正确答案"往往不止一处
+const alsoHasFact = chunks.filter(
+  (x) => !c.goldDocIds.includes(x.docId) && must.some((m) => x.text.includes(m)),
 );
 console.log(`\n📌 含答案的片段：${answerChunks.length} 个`);
 for (const a of answerChunks) {
@@ -42,11 +48,21 @@ for (const a of answerChunks) {
 if (!answerChunks.length) {
   console.log("   ⚠️ 一个都没有——要么关键事实标错了，要么切分把答案切碎了");
 }
+if (alsoHasFact.length) {
+  console.log(`\n📎 标注文档之外，还有 ${alsoHasFact.length} 个片段也含该关键事实：`);
+  for (const a of alsoHasFact.slice(0, 6)) {
+    console.log(`   ${a.id}｜${a.text.slice(0, 60).replace(/\n/g, " ")}…`);
+  }
+  console.log("   （它们同样能支撑正确回答——文档级判定会把命中它们算作失手，事实级不会）");
+}
 
 const bm = buildBm25(chunks);
 const bmAll = bm.search(c.question, chunks.length);
-console.log(`\n🔎 BM25`);
-console.log(`   前 5：${bmAll.slice(0, 5).map((h) => `${h.chunk.id}(${h.score.toFixed(2)})`).join("  ")}`);
+console.log(`\n🔎 BM25 前 5`);
+for (const [i, h] of bmAll.slice(0, 5).entries()) {
+  console.log(`   ${i + 1}. ${h.chunk.id}（${h.score.toFixed(2)}）命中词 ${h.matched.join("、") || "（无）"}`);
+  console.log(`      ${(h.chunk.text).slice(0, 70).replace(/\n/g, " ")}…`);
+}
 for (const a of answerChunks) {
   const r = bmAll.findIndex((h) => h.chunk.id === a.id);
   const hit = r >= 0 ? bmAll[r]! : undefined;
@@ -61,8 +77,11 @@ if (existsSync(VEC)) {
   for (const x of chunks) { const v = vecs.get(x.id); if (v) vi.add(x, v); }
   const emb = new LocalEmbedder(file.model);
   const vAll = await vi.search(emb, c.question, chunks.length);
-  console.log(`\n🧠 向量（${file.model}）`);
-  console.log(`   前 5：${vAll.slice(0, 5).map((h) => `${h.chunk.id}(${h.score.toFixed(3)})`).join("  ")}`);
+  console.log(`\n🧠 向量前 5（${file.model}）`);
+  for (const [i, h] of vAll.slice(0, 5).entries()) {
+    console.log(`   ${i + 1}. ${h.chunk.id}（余弦 ${h.score.toFixed(3)}）`);
+    console.log(`      ${(h.chunk.text).slice(0, 70).replace(/\n/g, " ")}…`);
+  }
   for (const a of answerChunks) {
     const r = vAll.findIndex((h) => h.chunk.id === a.id);
     console.log(`   答案片段 ${a.id} 排第 ${r < 0 ? "未命中" : r + 1} 名｜余弦 ${vAll[r]?.score.toFixed(3) ?? 0}`);

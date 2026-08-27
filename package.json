@@ -10,8 +10,8 @@
     "fetch:wiki": "node --import tsx scripts/fetch-wiki.ts",
     "eval": "node --import tsx scripts/eval-retrieval.ts",
     "vectors": "node --import tsx scripts/build-vectors.ts",
-    "why": "node --import tsx scripts/why.ts",
-    "sweep": "node --import tsx scripts/sweep-chunking.ts"
+    "sweep": "node --import tsx scripts/sweep-chunking.ts",
+    "diag": "node --import tsx scripts/diag.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
