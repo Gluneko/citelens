@@ -54,6 +54,10 @@ pnpm vectors                  # 给所有 chunk 算向量（首次需下模型 ~
 pnpm eval -- --mode both --verbose   # BM25 与向量并排对照，逐题看谁赢
 pnpm eval -- --k1 1.2 --b 0.5        # BM25 调参
 
+pnpm why g12                  # 单题诊断：答案片段到底排第几、分数差在哪
+pnpm sweep                    # 四种切分策略 × 两路检索的 A/B（几分钟）
+pnpm sweep -- --no-vec        # 只比 BM25，秒出
+
 pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问维基的网络）
 ```
 
@@ -85,7 +89,7 @@ pnpm fetch:wiki  # 可选：抓维基地学条目扩充语料（需要能访问�
 
 - [x] Day 0：语料 + 定长切分（保留字符区间）+ 20 题金标准 + case lint
 - [x] Day 1：手写 BM25（倒排索引 / TF-IDF / 中文分词）+ recall@k / MRR 评测 → **recall@5 基线**
-- [ ] Day 2：向量检索（本地 bge-small-zh，暴力余弦）+ 四种切分策略 A/B
+- [x] Day 2：向量检索（本地 bge-small-zh，暴力余弦）+ 四种切分策略 A/B + 单题诊断工具
 - [ ] Day 3：RRF 混合召回 + cross-encoder 重排 → NDCG@5 三档对照
 - [ ] Day 4：向量库选型（暴力 vs HNSW）+ 归因校验器 + 对抗集
 - [ ] Day 5：查询改写 / HyDE / 会话式指代消解 + 图谱增强 + 评测收口

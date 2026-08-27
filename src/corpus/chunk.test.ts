@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { Doc } from "../types.js";
-import { chunkFixed } from "./chunk.js";
+import { chunkBy, chunkFixed, chunkParentChild, chunkStructure } from "./chunk.js";
 import { parseDoc } from "./load.js";
 
 const doc = (text: string): Doc => ({
@@ -58,4 +58,52 @@ test("frontmatter 解析：出处与许可必须被读出来", () => {
   assert.equal(d.source, "合成语料");
   assert.equal(d.license, "CC0");
   assert.equal(d.text, "正文开始。");
+});
+
+test("结构切分：不在句子中间下刀", () => {
+  const d = doc("# 标题\n\n第一句话结束。第二句话也结束。\n\n第二段开始了。第二段结束了。");
+  for (const c of chunkStructure(d, 20)) {
+    const t = c.text.trim();
+    if (!t) continue;
+    assert.ok(/[。！？；#]$|^#/.test(t) || t === d.text.slice(c.start, c.end).trim(),
+      `块不该断在句中：「${t}」`);
+  }
+});
+
+test("结构切分同样守住区间不变量", () => {
+  const d = doc("# 玄武岩\n\n第一段内容。很长的一段话在这里。\n\n第二段内容。也有若干句子。");
+  for (const c of chunkStructure(d, 30)) {
+    assert.equal(c.text, d.text.slice(c.start, c.end));
+  }
+});
+
+test("父子块：子块小、父块大，且父块必须包含子块", () => {
+  const d = doc("# 玄武岩\n\n玄武岩是喷出岩。气体逸出留下孔洞，形成气孔构造。孔洞被充填后称杏仁构造。\n\n玄武岩浆黏度低。常形成熔岩台地。");
+  const cs = chunkParentChild(d, 25, 200);
+  assert.ok(cs.length > 0);
+  for (const c of cs) {
+    assert.equal(c.text, d.text.slice(c.start, c.end), "子块区间不变量");
+    assert.ok(c.context, "父子块必须带 context");
+    assert.ok(c.context!.includes(c.text), "父块必须包含子块全文");
+    assert.ok(c.context!.length >= c.text.length);
+  }
+});
+
+test("父子块确实把长块拆细了（这是它的全部意义）", () => {
+  const long = "这是一个句子。".repeat(30);
+  const d = doc(`# 标题\n\n${long}`);
+  const pc = chunkParentChild(d, 60, 400);
+  const fixed = chunkFixed(d, { size: 300, overlap: 60 });
+  const avgPc = pc.reduce((s, c) => s + c.text.length, 0) / pc.length;
+  const avgFx = fixed.reduce((s, c) => s + c.text.length, 0) / fixed.length;
+  assert.ok(avgPc < avgFx / 2, `子块应显著更短：${avgPc.toFixed(0)} vs ${avgFx.toFixed(0)}`);
+});
+
+test("四种策略都能跑，且 id 唯一", () => {
+  const d = doc("# 标题\n\n第一段。有两句话。\n\n第二段。也有两句。");
+  for (const s of ["fixed", "overlap", "structure", "parent-child"] as const) {
+    const cs = chunkBy(d, s);
+    assert.ok(cs.length > 0, `${s} 切出 0 块`);
+    assert.equal(new Set(cs.map((c) => c.id)).size, cs.length, `${s} 有重复 id`);
+  }
 });

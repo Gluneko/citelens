@@ -30,6 +30,12 @@ export interface Chunk {
   start: number;
   end: number;
   source: string;
+  /**
+   * 喂给模型的上下文。多数策略下等于 text；
+   * 父子块策略下是「父块全文」——**用小块去检索，用大块去回答**。
+   * 检索要的是信号纯，回答要的是上下文全，这两件事可以分开优化。
+   */
+  context?: string;
 }
 
 /** 金标准问答：一个问题 + 它应该命中的 chunk 所属文档/关键片段 */
