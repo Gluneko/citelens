@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { Answer } from "./schema.js";
-import { extractNumbers, normalizeForQuote, verifyAttribution, type EvidenceChunk } from "./verify.js";
+import { extractNumbers, normalizeForQuote, stripChunkIds, verifyAttribution, type EvidenceChunk } from "./verify.js";
 
 const EVIDENCE: EvidenceChunk[] = [
   { id: "basalt#0", text: "玄武岩是分布最广的喷出岩，二氧化硅含量介于45%～52%之间，属基性火山岩。岩浆中溶解的气体逸出后留下孔洞，形成气孔构造。" },
@@ -116,4 +116,27 @@ test("正文出现断言未覆盖的数字 → warn 不拦截", () => {
 test("工具函数：空白归一化与数字抽取", () => {
   assert.equal(normalizeForQuote("45% ～ 52%\n之间"), "45%～52%之间");
   assert.deepEqual(extractNumbers("含量45%～52.5%，共2类"), ["45", "52.5", "2"]);
+});
+
+test("误报回归（实弹事故锁定）：summary 里的片段 id 不该被当成未溯源数字", () => {
+  const a = honest();
+  // 模型规范地标注了出处，id 自带数字——这不是事实性数字
+  a.summary = "据「basalt#0」与「granite#0」，玄武岩二氧化硅含量为45%～52%。";
+  const ev = [...EVIDENCE, { id: "wiki-020-玄武岩#0", text: "玄武岩二氧化硅的含量大约是45-52%" }];
+  const r = verifyAttribution(a, ev);
+  assert.ok(!r.issues.some((i) => i.rule === "summary.unclaimed-number"),
+    `不该误报：${JSON.stringify(r.issues)}`);
+});
+
+test("剔除 id 后，真正未溯源的数字仍然要报", () => {
+  const a = honest();
+  a.summary = "据「basalt#0」，玄武岩密度约2.9克每立方厘米。";
+  const r = verifyAttribution(a, EVIDENCE);
+  const hit = r.issues.find((i) => i.rule === "summary.unclaimed-number");
+  assert.ok(hit && hit.message.includes("2.9"), "2.9 未被任何断言覆盖，必须报");
+});
+
+test("stripChunkIds：长 id 优先替换，不留残片", () => {
+  const out = stripChunkIds("见 wiki-020-玄武岩#0 与 basalt#0", ["basalt#0", "wiki-020-玄武岩#0"]);
+  assert.equal(extractNumbers(out).length, 0, `残留数字：${out}`);
 });

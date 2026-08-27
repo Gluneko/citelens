@@ -49,6 +49,20 @@ export function extractNumbers(text: string): string[] {
   return [...text.matchAll(/\d+(?:\.\d+)?/g)].map((m) => m[0]!);
 }
 
+/**
+ * 从文本中剔除片段 id（如 wiki-020-玄武岩#0）。
+ * 片段 id 里的数字是引用标记，不是事实性数字——统计"未溯源数字"前必须先摘掉，
+ * 否则每一次规范的引用标注反而会触发告警。
+ */
+export function stripChunkIds(text: string, ids: string[]): string {
+  let out = text;
+  // 长 id 先替换，避免短 id 是长 id 前缀时切出残片
+  for (const id of [...ids].sort((a, b) => b.length - a.length)) {
+    out = out.split(id).join("");
+  }
+  return out;
+}
+
 export interface VerifyAnswerOptions {
   /** 本次检索是否没捞到可用证据。为 true 时模型【必须】拒答 */
   evidenceInsufficient?: boolean;
@@ -137,8 +151,13 @@ export function verifyAttribution(
   });
 
   // 提醒级：summary 里出现了任何断言都没提过的数字
+  //
+  // 注意先剔除片段 id：summary 里常写「据 wiki-020-玄武岩#0」，
+  // 这些 id 自带数字，若不剔除会把 020、0 当成"未溯源的数字"报出来。
+  // （实弹踩坑：第一次跑就误报了「020、0、0、020、2、1」——
+  //  校验器误报也是故障，它会让人开始无视告警。）
   const claimed = new Set(answer.claims.flatMap((c) => extractNumbers(c.text)));
-  const orphan = extractNumbers(answer.summary).filter((n) => !claimed.has(n));
+  const orphan = extractNumbers(stripChunkIds(answer.summary, [...byId.keys()])).filter((n) => !claimed.has(n));
   if (orphan.length && !answer.refused) {
     issues.push({
       rule: "summary.unclaimed-number",
