@@ -16,7 +16,8 @@ import { join } from "node:path";
 const OUT = "data/corpus-wiki";
 const UA = "CiteLens/0.1 (personal RAG study project; contact via github.com/Gluneko)";
 const API = "https://zh.wikipedia.org/w/api.php";
-const DELAY_MS = 1100;
+const DELAY_MS = Number(process.env.WIKI_DELAY_MS ?? 1500);
+const MAX_RETRY = 4;
 
 /** 地学条目清单：覆盖三大岩类、矿物、构造、古生物、化探，且彼此有交叉引用（利于造多跳问题） */
 const TITLES = [
@@ -34,14 +35,34 @@ const TITLES = [
   "矿床", "斑岩铜矿", "矽卡岩", "热液矿床", "伟晶岩", "成矿作用", "找矿", "地球物理勘探", "钻探", "地质图",
 ];
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 抓一篇。429（限频）与 5xx（服务端抖动）都做指数退避重试：
+ * 服务器给了 Retry-After 就听它的，没给就 5s → 15s → 45s → 135s。
+ * 这是"做个有礼貌的抓取者"的第二层——限频不只是我方主动放慢，
+ * 还包括对方喊停时真的停下来等，而不是硬撞。
+ */
 async function fetchExtract(title: string): Promise<string | null> {
   const url = `${API}?action=query&format=json&formatversion=2&prop=extracts&explaintext=1&exsectionformat=plain&redirects=1&titles=${encodeURIComponent(title)}`;
-  const res = await fetch(url, { headers: { "User-Agent": UA, "Accept-Encoding": "gzip" } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json: any = await res.json();
-  const page = json?.query?.pages?.[0];
-  if (!page || page.missing) return null;
-  return typeof page.extract === "string" ? page.extract : null;
+  let wait = 5000;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { headers: { "User-Agent": UA, "Accept-Encoding": "gzip" } });
+    if (res.status === 429 || res.status >= 500) {
+      if (attempt >= MAX_RETRY) throw new Error(`HTTP ${res.status}（重试 ${MAX_RETRY} 次仍失败）`);
+      const ra = Number(res.headers.get("retry-after"));
+      const delay = Number.isFinite(ra) && ra > 0 ? ra * 1000 : wait;
+      console.log(`   ⏳ ${res.status}，等待 ${(delay / 1000).toFixed(0)}s 后重试（第 ${attempt + 1}/${MAX_RETRY} 次）`);
+      await sleep(delay);
+      wait *= 3;
+      continue;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json: any = await res.json();
+    const page = json?.query?.pages?.[0];
+    if (!page || page.missing) return null;
+    return typeof page.extract === "string" ? page.extract : null;
+  }
 }
 
 /** 去掉参考文献/外部链接等尾部小节，它们对问答无用却污染检索 */
@@ -86,7 +107,10 @@ for (const [i, title] of list.entries()) {
     fail++;
     console.log(`✗  ${title}：${e instanceof Error ? e.message : e}`);
   }
-  await new Promise((r) => setTimeout(r, DELAY_MS)); // 限频，做个有礼貌的抓取者
+  await sleep(DELAY_MS + Math.floor(Math.random() * 400)); // 限频 + 抖动，避免整齐节拍撞上对方的限流窗口
 }
 console.log(`\n📦 成功 ${ok} / 缺失 ${miss} / 失败 ${fail}，共 ${chars} 字 → ${OUT}/`);
-if (fail > 0) console.log("提示：若全部失败，多半是网络不通——请在能访问维基的终端里跑。");
+if (fail > 0) {
+  console.log("提示：脚本会跳过已抓到的条目，直接重跑即可只补失败的那些。");
+  console.log("      仍大面积 429 时，把间隔调大再来：WIKI_DELAY_MS=4000 pnpm fetch:wiki");
+}
