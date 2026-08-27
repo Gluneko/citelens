@@ -76,6 +76,8 @@ interface Row {
   run: number;
   id: string; answerable: boolean; refused: boolean; rounds: number;
   errors: number; rules: string[]; cost: number; honest: boolean;
+  /** 不诚实或未通过时，存下完整回答——失败样本才是下一步的原料 */
+  answer?: unknown;
 }
 const allRows: Row[] = [];
 let fatal = false;
@@ -134,6 +136,7 @@ for (const c of cases) {
     run, id: c.id, answerable, refused: answer.refused, rounds: round,
     errors: verdict.stats.errors, rules: verdict.issues.filter((i) => i.severity === "error").map((i) => i.rule),
     cost, honest,
+    answer: honest && verdict.passed ? undefined : answer,
   });
   const mark = honest ? (verdict.passed ? "✅" : "🟡") : "❌";
   const what = answerable ? (answer.refused ? "该答却拒答" : "作答") : (answer.refused ? "诚实拒答" : "该拒却硬答");
