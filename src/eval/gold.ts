@@ -6,13 +6,27 @@
  * 所以它进单测，每次跑测试都自动体检。
  */
 import { readFileSync } from "node:fs";
-import type { Doc, GoldCase } from "../types.js";
+import type { Doc, ExpectedBehavior, GoldCase } from "../types.js";
 
 export function loadGold(path = "data/gold/questions.jsonl"): GoldCase[] {
   return readFileSync(path, "utf-8")
     .split(/\r?\n/)
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l) as GoldCase);
+}
+
+/** 期望行为：显式声明优先，否则按 goldDocIds 推断 */
+export function expectedOf(c: GoldCase): ExpectedBehavior {
+  return c.expect ?? (c.goldDocIds.length > 0 ? "answer" : "refuse");
+}
+
+/**
+ * 缺口声明检测：模型是否明说了"片段里没有这部分"。
+ * 用于 partial 题的判定——只作答不声明缺口，等于把不完整当完整卖。
+ */
+const GAP_MARKERS = /未(提及|说明|给出|涉及|再说明)|没有(提到|说明|给出|涉及)|不包含|未包含|片段(中|里)?(并)?(未|没有)|无法确定|资料中没有|缺少/;
+export function declaresGap(text: string): boolean {
+  return GAP_MARKERS.test(text);
 }
 
 export interface GoldLintIssue {
@@ -41,8 +55,11 @@ export function lintGold(cases: GoldCase[], docs: Doc[]): GoldLintIssue[] {
       if (!hit) issues.push({ caseId: c.id, problem: `mustContain「${must}」在标注文档中找不到` });
     }
 
-    if (c.goldDocIds.length === 0 && (c.mustContain?.length ?? 0) > 0) {
+    if (expectedOf(c) === "refuse" && (c.mustContain?.length ?? 0) > 0) {
       issues.push({ caseId: c.id, problem: "拒答题不应有 mustContain" });
+    }
+    if (c.expect === "partial" && c.goldDocIds.length > 0) {
+      issues.push({ caseId: c.id, problem: "partial 题不标 goldDocIds：它考的是缺口声明，不是命中哪篇" });
     }
   }
   return issues;

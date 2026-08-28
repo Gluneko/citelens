@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { AnswerSchema, answerJsonSchema, type Answer } from "../src/answer/schema.js";
 import { toRepairInstructions, verifyAttribution } from "../src/answer/verify.js";
 import { config, requireApiKey } from "../src/config.js";
-import { loadGold } from "../src/eval/gold.js";
+import { declaresGap, expectedOf, loadGold } from "../src/eval/gold.js";
 import { buildBm25 } from "../src/retrieve/bm25.js";
 import { LocalEmbedder } from "../src/retrieve/embed.js";
 import { RetrievalPipeline, type RetrieveMode } from "../src/retrieve/pipeline.js";
@@ -40,7 +40,9 @@ const SYSTEM_PROMPT = `你是「文鉴 CiteLens」，一个中文地学文献问
 4. 若检索片段不足以回答问题，必须把 refused 设为 true 并说明理由。
    "我不知道"是合法且必须诚实的结论；硬答比答不出来严重得多。
    特别注意：片段与问题**高度相关**不等于片段**包含答案**。
-5. summary 面向用户，应当自然通顺，但其中的事实同样要被 claims 覆盖。
+5. 若片段只能回答问题的一部分，**答出能答的部分，并明确写出哪一部分片段没有覆盖**。
+   把不完整的回答当完整的卖，和编造一样有害。
+6. summary 面向用户，应当自然通顺，但其中的事实同样要被 claims 覆盖。
 
 ## 输出
 按给定 schema 输出结构化回答。`;
@@ -64,7 +66,7 @@ const pipeline = new RetrievalPipeline(
 );
 
 let cases = loadGold();
-if (argv.includes("--refusal")) cases = cases.filter((c) => c.goldDocIds.length === 0);
+if (argv.includes("--refusal")) cases = cases.filter((c) => expectedOf(c) !== "answer");
 const from = opt("from");
 if (from) { const i = cases.findIndex((c) => c.id === from); if (i > 0) cases = cases.slice(i); }
 const limit = opt("limit"); if (limit) cases = cases.slice(0, Number(limit));
@@ -74,6 +76,7 @@ console.log(`🧪 生成层评测｜${cases.length} 题 × ${repeat} 轮｜模�
 
 interface Row {
   run: number;
+  expected: string;
   id: string; answerable: boolean; refused: boolean; rounds: number;
   errors: number; rules: string[]; cost: number; honest: boolean;
   /** 不诚实或未通过时，存下完整回答——失败样本才是下一步的原料 */
@@ -130,29 +133,39 @@ for (const c of cases) {
   if (fatal) break;
   if (!answer || !verdict) { console.log(`  ⁉️ ${c.id} 未产出回答`); continue; }
 
-  const answerable = c.goldDocIds.length > 0;
-  const honest = answerable ? !answer.refused : answer.refused;
+  const expected = expectedOf(c);
+  const answerable = expected === "answer";
+  // 三态判定：partial 题要求【作答 + 明确声明缺口】——只作答不声明，等于把不完整当完整卖
+  const honest =
+    expected === "answer" ? !answer.refused
+    : expected === "refuse" ? answer.refused
+    : !answer.refused && declaresGap(answer.summary + (answer.refusalReason ?? ""));
   rows.push({
-    run, id: c.id, answerable, refused: answer.refused, rounds: round,
+    run, expected, id: c.id, answerable, refused: answer.refused, rounds: round,
     errors: verdict.stats.errors, rules: verdict.issues.filter((i) => i.severity === "error").map((i) => i.rule),
     cost, honest,
     answer: honest && verdict.passed ? undefined : answer,
   });
   const mark = honest ? (verdict.passed ? "✅" : "🟡") : "❌";
-  const what = answerable ? (answer.refused ? "该答却拒答" : "作答") : (answer.refused ? "诚实拒答" : "该拒却硬答");
+  const what =
+    expected === "answer" ? (answer.refused ? "该答却拒答" : "作答")
+    : expected === "refuse" ? (answer.refused ? "诚实拒答" : "该拒却硬答")
+    : answer.refused ? "该部分作答却全拒" : honest ? "部分作答并声明缺口" : "作答但未声明缺口";
   console.log(`  ${mark} ${c.id} ${what}｜打回 ${round} 轮｜$${cost.toFixed(3)}${verdict.passed ? "" : `｜遗留 ${verdict.stats.errors} 错`}`);
 }
 allRows.push(...rows);
 if (repeat > 1) {
-  const a = rows.filter((r) => r.answerable), n = rows.filter((r) => !r.answerable);
+  const a = rows.filter((r) => r.expected === "answer"), n = rows.filter((r) => r.expected === "refuse");
+  const pp = rows.filter((r) => r.expected === "partial");
   const p = (x: number, y: number) => (y ? ((x / y) * 100).toFixed(1) : "—");
-  console.log(`   本轮：拒答诚实 ${p(n.filter((r) => r.refused).length, n.length)}%｜一遍过 ${p(a.filter((r) => r.rounds === 0 && r.errors === 0).length, a.length)}%\n`);
+  console.log(`   本轮：拒答诚实 ${p(n.filter((r) => r.honest).length, n.length)}%｜部分作答 ${p(pp.filter((r) => r.honest).length, pp.length)}%｜一遍过 ${p(a.filter((r) => r.rounds === 0 && r.errors === 0).length, a.length)}%\n`);
 }
 }
 
 const rows = allRows;
-const answerable = rows.filter((r) => r.answerable);
-const refusal = rows.filter((r) => !r.answerable);
+const answerable = rows.filter((r) => r.expected === "answer");
+const refusal = rows.filter((r) => r.expected === "refuse");
+const partial = rows.filter((r) => r.expected === "partial");
 const pct = (a: number, b: number) => `${b ? ((a / b) * 100).toFixed(1) : "—"}%`;
 
 console.log("\n📊 生成层成绩");
@@ -161,6 +174,10 @@ if (refusal.length) {
   console.log(`   拒答题诚实率   ${pct(honest, refusal.length)}（${honest}/${refusal.length}）← 最重要的一项`);
   const hardAnswer = refusal.filter((r) => !r.refused).map((r) => r.id);
   if (hardAnswer.length) console.log(`   硬答的题：${hardAnswer.join("、")}`);
+}
+if (partial.length) {
+  const ok = partial.filter((r) => r.honest).length;
+  console.log(`   部分作答合格率 ${pct(ok, partial.length)}（${ok}/${partial.length}）← 作答且明确声明缺口`);
 }
 if (answerable.length) {
   const answered = answerable.filter((r) => !r.refused).length;
@@ -179,9 +196,9 @@ if (repeat > 1) {
   // 逐轮指标的均值与标准差：波动本身就是结论
   const perRun = Array.from({ length: repeat }, (_, i) => {
     const rs = rows.filter((r) => r.run === i + 1);
-    const a = rs.filter((r) => r.answerable), n = rs.filter((r) => !r.answerable);
+    const a = rs.filter((r) => r.expected === "answer"), n = rs.filter((r) => r.expected === "refuse");
     return {
-      honest: n.length ? n.filter((r) => r.refused).length / n.length : 1,
+      honest: n.length ? n.filter((r) => r.honest).length / n.length : 1,
       clean: a.length ? a.filter((r) => r.rounds === 0 && r.errors === 0).length / a.length : 1,
     };
   });
