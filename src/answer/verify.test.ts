@@ -14,6 +14,7 @@ const EVIDENCE: EvidenceChunk[] = [
 
 const honest = (): Answer => ({
   refused: false,
+  gaps: [],
   claims: [
     {
       text: "玄武岩的二氧化硅含量介于45%～52%之间。",
@@ -87,7 +88,7 @@ test("铁律4：证据不足却硬答，被抓", () => {
 });
 
 test("铁律4：证据不足时诚实拒答，通过", () => {
-  const a: Answer = { refused: true, refusalReason: "检索结果中没有相关信息", claims: [], summary: "无法回答。" };
+  const a: Answer = { refused: true, refusalReason: "检索结果中没有相关信息", claims: [], gaps: [], summary: "无法回答。" };
   const r = verifyAttribution(a, EVIDENCE, { evidenceInsufficient: true });
   assert.equal(r.passed, true, JSON.stringify(r.issues));
 });
@@ -99,7 +100,7 @@ test("拒答却仍给断言，被抓（自相矛盾）", () => {
 });
 
 test("既不拒答也不给断言，被抓", () => {
-  const a: Answer = { refused: false, claims: [], summary: "大概是这样吧。" };
+  const a: Answer = { refused: false, claims: [], gaps: [], summary: "大概是这样吧。" };
   const r = verifyAttribution(a, EVIDENCE);
   assert.ok(r.issues.some((i) => i.rule === "claims.empty"));
 });

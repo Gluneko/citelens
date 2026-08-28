@@ -29,7 +29,9 @@ const SYSTEM_PROMPT = `你是「文鉴 CiteLens」，一个中文地学文献问
    宁可不写数字，也不要写一个"差不多"的数字。
 4. 若检索片段不足以回答问题，必须把 refused 设为 true 并说明理由。
    "我不知道"是合法且必须诚实的结论；硬答比答不出来严重得多。
-5. summary 面向用户，应当自然通顺，但其中的事实同样要被 claims 覆盖。
+5. 若片段只能回答问题的一部分，答出能答的部分，并把片段未覆盖的方面逐条写入
+   gaps 字段（同时在 summary 中向用户说明）。完整回答时 gaps 为空数组。
+6. summary 面向用户，应当自然通顺，但其中的事实同样要被 claims 覆盖。
 
 ## 输出
 按给定 schema 输出结构化回答。`;
@@ -169,6 +171,7 @@ if (answer.refused) {
   console.log(`\n${answer.summary}`);
 } else {
   console.log(`\n【回答】\n${answer.summary}`);
+  if (answer.gaps.length) console.log(`\n【未覆盖】${answer.gaps.map((g) => `「${g}」`).join(" ")}——检索片段未涉及这些方面`);
   console.log(`\n【逐条溯源】`);
   answer.claims.forEach((c, i) => {
     console.log(`  ${i + 1}. ${c.text}`);

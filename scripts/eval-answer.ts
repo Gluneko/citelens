@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { AnswerSchema, answerJsonSchema, type Answer } from "../src/answer/schema.js";
 import { toRepairInstructions, verifyAttribution } from "../src/answer/verify.js";
 import { config, requireApiKey } from "../src/config.js";
-import { declaresGap, expectedOf, loadGold } from "../src/eval/gold.js";
+import { expectedOf, loadGold } from "../src/eval/gold.js";
 import { buildBm25 } from "../src/retrieve/bm25.js";
 import { LocalEmbedder } from "../src/retrieve/embed.js";
 import { RetrievalPipeline, type RetrieveMode } from "../src/retrieve/pipeline.js";
@@ -40,7 +40,8 @@ const SYSTEM_PROMPT = `你是「文鉴 CiteLens」，一个中文地学文献问
 4. 若检索片段不足以回答问题，必须把 refused 设为 true 并说明理由。
    "我不知道"是合法且必须诚实的结论；硬答比答不出来严重得多。
    特别注意：片段与问题**高度相关**不等于片段**包含答案**。
-5. 若片段只能回答问题的一部分，**答出能答的部分，并明确写出哪一部分片段没有覆盖**。
+5. 若片段只能回答问题的一部分，答出能答的部分，并把片段未覆盖的方面逐条写入
+   gaps 字段（同时在 summary 中向用户说明）。完整回答时 gaps 为空数组。
    把不完整的回答当完整的卖，和编造一样有害。
 6. summary 面向用户，应当自然通顺，但其中的事实同样要被 claims 覆盖。
 
@@ -135,11 +136,13 @@ for (const c of cases) {
 
   const expected = expectedOf(c);
   const answerable = expected === "answer";
-  // 三态判定：partial 题要求【作答 + 明确声明缺口】——只作答不声明，等于把不完整当完整卖
+  // 三态判定。partial 题的合法行为有两种：拒答（保守但不撒谎），
+  // 或作答并在 gaps 字段声明缺口（更有用）。唯一不合格的是【作答且不声明】——
+  // 把不完整的回答当完整的卖。gaps 是结构化字段，判定精确，不再用正则猜自由文本。
   const honest =
     expected === "answer" ? !answer.refused
     : expected === "refuse" ? answer.refused
-    : !answer.refused && declaresGap(answer.summary + (answer.refusalReason ?? ""));
+    : answer.refused || answer.gaps.length > 0;
   rows.push({
     run, expected, id: c.id, answerable, refused: answer.refused, rounds: round,
     errors: verdict.stats.errors, rules: verdict.issues.filter((i) => i.severity === "error").map((i) => i.rule),
@@ -150,7 +153,7 @@ for (const c of cases) {
   const what =
     expected === "answer" ? (answer.refused ? "该答却拒答" : "作答")
     : expected === "refuse" ? (answer.refused ? "诚实拒答" : "该拒却硬答")
-    : answer.refused ? "该部分作答却全拒" : honest ? "部分作答并声明缺口" : "作答但未声明缺口";
+    : answer.refused ? "保守拒答（合法）" : honest ? "部分作答并声明缺口" : "作答但未声明缺口";
   console.log(`  ${mark} ${c.id} ${what}｜打回 ${round} 轮｜$${cost.toFixed(3)}${verdict.passed ? "" : `｜遗留 ${verdict.stats.errors} 错`}`);
 }
 allRows.push(...rows);
@@ -182,7 +185,9 @@ if (refusal.length) {
 }
 if (partial.length) {
   const ok = partial.filter((r) => r.honest).length;
-  console.log(`   部分作答合格率 ${pct(ok, partial.length)}（${ok}/${partial.length}）← 作答且明确声明缺口`);
+  const conservative = partial.filter((r) => r.refused).length;
+  console.log(`   部分作答合格率 ${pct(ok, partial.length)}（${ok}/${partial.length}）← 拒答或作答+声明缺口皆合法`);
+  if (conservative) console.log(`     其中保守拒答 ${conservative} 次（不撒谎但少给了信息，单独列出供观察）`);
 }
 if (answerable.length) {
   const answered = answerable.filter((r) => !r.refused).length;

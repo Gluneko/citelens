@@ -21,13 +21,11 @@ export function expectedOf(c: GoldCase): ExpectedBehavior {
 }
 
 /**
- * 缺口声明检测：模型是否明说了"片段里没有这部分"。
- * 用于 partial 题的判定——只作答不声明缺口，等于把不完整当完整卖。
+ * （已废弃，仅存档教训）缺口声明曾用正则在自由文本里检测，
+ * 实弹漏检"未提供/无法覆盖"两种说法，把诚实回答误判成硬答——
+ * 语义判断塞进确定性层必然正则打地鼠（BrachioKey std-range 教训复刻）。
+ * 现改为 Answer.gaps 结构化字段：确定性层只考"字段填没填"这个规定动作。
  */
-const GAP_MARKERS = /未(提及|说明|给出|涉及|再说明)|没有(提到|说明|给出|涉及)|不包含|未包含|片段(中|里)?(并)?(未|没有)|无法确定|资料中没有|缺少/;
-export function declaresGap(text: string): boolean {
-  return GAP_MARKERS.test(text);
-}
 
 export interface GoldLintIssue {
   caseId: string;
