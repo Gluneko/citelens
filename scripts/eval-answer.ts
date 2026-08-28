@@ -163,6 +163,11 @@ if (repeat > 1) {
 }
 
 const rows = allRows;
+if (rows.length === 0) {
+  // 一次作答都没有时，任何比率都是真空真理——宁可不报，不报一个好看的空话
+  console.log("\n📊 无任何完成的作答，不输出成绩。" + (fatal ? "（因致命错误中止）" : ""));
+  process.exit(fatal ? 2 : 1);
+}
 const answerable = rows.filter((r) => r.expected === "answer");
 const refusal = rows.filter((r) => r.expected === "refuse");
 const partial = rows.filter((r) => r.expected === "partial");
@@ -193,15 +198,17 @@ if (byRule.size) {
 console.log(`   总成本         $${rows.reduce((s, r) => s + r.cost, 0).toFixed(3)}（${rows.length} 次作答）`);
 
 if (repeat > 1) {
-  // 逐轮指标的均值与标准差：波动本身就是结论
-  const perRun = Array.from({ length: repeat }, (_, i) => {
-    const rs = rows.filter((r) => r.run === i + 1);
+  // 逐轮指标的均值与标准差：波动本身就是结论（只统计真正完成的轮次）
+  const doneRuns = [...new Set(rows.map((r) => r.run))];
+  const perRun = doneRuns.map((runNo) => {
+    const rs = rows.filter((r) => r.run === runNo);
     const a = rs.filter((r) => r.expected === "answer"), n = rs.filter((r) => r.expected === "refuse");
     return {
       honest: n.length ? n.filter((r) => r.honest).length / n.length : 1,
       clean: a.length ? a.filter((r) => r.rounds === 0 && r.errors === 0).length / a.length : 1,
     };
   });
+  if (doneRuns.length < repeat) console.log(`\n   ⚠️ 仅完成 ${doneRuns.length}/${repeat} 轮（中途中止），以下统计只覆盖已完成部分`);
   const stat = (xs: number[]) => {
     const m = xs.reduce((x, y) => x + y, 0) / xs.length;
     const sd = Math.sqrt(xs.reduce((s2, x) => s2 + (x - m) ** 2, 0) / xs.length);
