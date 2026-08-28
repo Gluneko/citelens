@@ -14,8 +14,8 @@ test("金标准集自洽（docId 存在、关键事实确实在标注文档里�
 test("题量与题型覆盖", () => {
   const cases = loadGold();
   assert.equal(cases.length, 28);
-  assert.equal(cases.filter((c) => expectedOf(c) === "refuse").length, 8, "拒答题");
-  assert.equal(cases.filter((c) => expectedOf(c) === "partial").length, 1, "部分作答题");
+  assert.equal(cases.filter((c) => expectedOf(c) === "refuse").length, 7, "拒答题");
+  assert.equal(cases.filter((c) => expectedOf(c) === "partial").length, 2, "部分作答题");
   assert.ok(cases.filter((c) => c.goldDocIds.length > 1).length >= 1, "至少 1 道跨文档题");
 });
 
