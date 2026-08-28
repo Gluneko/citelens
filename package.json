@@ -8,13 +8,14 @@
     "test": "node --import tsx --test src/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "fetch:wiki": "node --import tsx scripts/fetch-wiki.ts",
-    "eval": "node --import tsx scripts/eval-retrieval.ts",
+    "eval": "node --env-file-if-exists=.env --import tsx scripts/eval-retrieval.ts",
     "vectors": "node --import tsx scripts/build-vectors.ts",
     "sweep": "node --import tsx scripts/sweep-chunking.ts",
     "diag": "node --import tsx scripts/diag.ts",
     "ask": "node --env-file-if-exists=.env --import tsx scripts/ask.ts",
     "calibrate": "node --import tsx scripts/calibrate-refusal.ts",
-    "eval:answer": "node --env-file-if-exists=.env --import tsx scripts/eval-answer.ts"
+    "eval:answer": "node --env-file-if-exists=.env --import tsx scripts/eval-answer.ts",
+    "bench:ann": "node --import tsx scripts/bench-ann.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -32,10 +32,20 @@ export interface CaseOutcome {
   liftedFrom?: number[];
 }
 
-export async function runCases(pipeline: RetrievalPipeline, gold: GoldCase[]): Promise<CaseOutcome[]> {
+export interface RunOptions {
+  /** 查询扩写器：给每题生成改写/HyDE 查询，多路召回 RRF 合并。undefined = 单查询 */
+  expander?: { name: string; expand(q: string): Promise<{ queries: string[]; cost: number }> };
+}
+
+export async function runCases(
+  pipeline: RetrievalPipeline,
+  gold: GoldCase[],
+  opts: RunOptions = {},
+): Promise<CaseOutcome[]> {
   const out: CaseOutcome[] = [];
   for (const c of gold) {
-    const r = await pipeline.search(c.question);
+    const queries = opts.expander ? (await opts.expander.expand(c.question)).queries : [c.question];
+    const r = queries.length > 1 ? await pipeline.searchMulti(queries) : await pipeline.search(c.question);
     const ranked = toDocRanking(r.hits.map((h) => h.docId));
     out.push({
       case: c,

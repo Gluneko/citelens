@@ -10,6 +10,9 @@
  *   pnpm eval -- --verbose                    逐题详情（精排模式下会显示"从第几名被顶上来"）
  *   pnpm eval -- --pool 50                    候选池大小（默认 50）
  *   pnpm eval -- --guarantee 15               混合模式下每路保底名额（默认 15，设 0 关闭）
+ *   pnpm eval -- --rewrite                    LLM 查询改写（口语→术语，多路召回合并；需 API key）
+ *   pnpm eval -- --hyde                       HyDE：先编假答案再拿它检索（需 API key）
+ *   pnpm eval -- --graph                      文档图谱多跳扩展（标题提及建边，离线）
  *   pnpm eval -- --rerank-top 20              只精排候选池前 N 条（默认全池，精排很贵）
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -17,6 +20,9 @@ import { loadCorpus } from "../src/corpus/load.js";
 import { loadGold } from "../src/eval/gold.js";
 import { runCases, summarizeRun, type EvalReport } from "../src/eval/run.js";
 import { buildBm25 } from "../src/retrieve/bm25.js";
+import { buildDocGraph, graphStats } from "../src/retrieve/graph.js";
+import { HydeExpander, LlmRewriter, type QueryExpander } from "../src/retrieve/rewrite.js";
+import { requireApiKey } from "../src/config.js";
 import { LocalEmbedder } from "../src/retrieve/embed.js";
 import { RetrievalPipeline, type RetrieveMode } from "../src/retrieve/pipeline.js";
 import { CrossEncoderReranker } from "../src/retrieve/rerank.js";
@@ -65,6 +71,36 @@ const plans: Array<{ mode: RetrieveMode; rerank: boolean }> = compare
     ]
   : [{ mode: (opt("mode") ?? "bm25") as RetrieveMode, rerank: argv.includes("--rerank") }];
 
+let expander: QueryExpander | undefined;
+if (argv.includes("--rewrite")) expander = new LlmRewriter();
+else if (argv.includes("--hyde")) expander = new HydeExpander();
+if (expander) {
+  requireApiKey();
+  console.log(`✍️  查询扩写：${expander.name}（每题一次 LLM 调用）`);
+}
+// 扩写结果按题缓存：--compare 下四种配置共用同一份扩写，省钱且变量可控
+const expandCache = new Map<string, string[]>();
+const cachedExpander = expander
+  ? {
+      name: expander.name,
+      expand: async (q: string) => {
+        const hit = expandCache.get(q);
+        if (hit) return { queries: hit, cost: 0 };
+        const r = await expander!.expand(q);
+        expandCache.set(q, r.queries);
+        return r;
+      },
+    }
+  : undefined;
+
+const useGraph = argv.includes("--graph");
+let graph;
+if (useGraph) {
+  graph = buildDocGraph(docs);
+  const gs = graphStats(graph);
+  console.log(`🕸  文档图谱：${gs.nodes} 节点 / ${gs.edges} 边｜孤点 ${gs.isolated.length}｜枢纽 ${gs.topHubs.slice(0, 3).map(([d, n]) => `${d}(${n})`).join(" ")}`);
+}
+
 const reranker = plans.some((p) => p.rerank) ? new CrossEncoderReranker() : undefined;
 const reports: EvalReport[] = [];
 const lastOutcomes = new Map<string, Awaited<ReturnType<typeof runCases>>>();
@@ -75,11 +111,11 @@ for (const plan of plans) {
     continue;
   }
   const pipeline = new RetrievalPipeline(
-    { bm25, vector, embedder, reranker: plan.rerank ? reranker : undefined },
-    { mode: plan.mode, poolSize, topK, guarantee, rerankTop },
+    { bm25, vector, embedder, reranker: plan.rerank ? reranker : undefined, graph, allChunks: useGraph ? chunks : undefined },
+    { mode: plan.mode, poolSize, topK, guarantee, rerankTop, graphExpand: useGraph ? 3 : 0 },
   );
   const t0 = performance.now();
-  const outcomes = await runCases(pipeline, gold);
+  const outcomes = await runCases(pipeline, gold, { expander: cachedExpander });
   const ms = performance.now() - t0;
   reports.push(summarizeRun(pipeline.label, outcomes, ms));
   lastOutcomes.set(pipeline.label, outcomes);

@@ -2,6 +2,7 @@
  * 文鉴 CiteLens 问答 CLI：检索 → 生成带出处的回答 → 归因校验 → 不过则定向打回。
  *
  * 用法：pnpm ask "玄武岩的二氧化硅含量是多少？"
+ *       pnpm ask "那种黑色的石头..." -- --rewrite   先把口语翻译成术语再检索
  *       pnpm ask "华南某矿区2024年金平均品位" --refuse-below 0
  *       pnpm ask "..." --top 5 --pool 50 --no-rerank
  *
@@ -16,6 +17,7 @@ import { buildBm25 } from "../src/retrieve/bm25.js";
 import { LocalEmbedder } from "../src/retrieve/embed.js";
 import { RetrievalPipeline, type RetrieveMode } from "../src/retrieve/pipeline.js";
 import { CrossEncoderReranker } from "../src/retrieve/rerank.js";
+import { LlmRewriter } from "../src/retrieve/rewrite.js";
 import { unpackVectors, VectorIndex, type VectorStoreFile } from "../src/retrieve/vector.js";
 import type { Chunk } from "../src/types.js";
 
@@ -74,7 +76,14 @@ console.log(`🔎 文鉴 CiteLens | 模型 ${config.model} | ${pipeline.label} |
 console.log(`❓ ${question}\n`);
 
 const t0 = performance.now();
-const retrieved = await pipeline.search(question);
+let retrieved;
+if (argv.includes("--rewrite")) {
+  const exp = await new LlmRewriter().expand(question);
+  console.log(`✍️  查询改写：${exp.queries.slice(1).map((q) => `「${q}」`).join(" ")}`);
+  retrieved = await pipeline.searchMulti(exp.queries);
+} else {
+  retrieved = await pipeline.search(question);
+}
 const retrieveMs = performance.now() - t0;
 
 console.log(`📚 检索到 ${retrieved.hits.length} 个片段（${retrieveMs.toFixed(0)}ms）`);

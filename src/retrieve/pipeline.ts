@@ -16,6 +16,7 @@ import type { Chunk } from "../types.js";
 import type { Bm25Index } from "./bm25.js";
 import type { Embedder } from "./embed.js";
 import { rrf } from "./fuse.js";
+import { expandPoolByGraph, type DocGraph } from "./graph.js";
 import { rerank, type Reranker } from "./rerank.js";
 import type { VectorIndex } from "./vector.js";
 
@@ -26,6 +27,9 @@ export interface PipelineDeps {
   vector?: VectorIndex;
   embedder?: Embedder;
   reranker?: Reranker;
+  /** 文档图谱 + 全量 chunk：启用多跳扩展时必须一起给 */
+  graph?: DocGraph;
+  allChunks?: Chunk[];
 }
 
 export interface PipelineOptions {
@@ -46,6 +50,8 @@ export interface PipelineOptions {
   guarantee?: number;
   /** 只精排候选池的前 N 条（精排很贵，这是成本旋钮）。0/未设表示全池精排 */
   rerankTop?: number;
+  /** 图谱扩展：取池中前 N 个文档的邻居首段补进池尾（多跳）。0/未设关闭 */
+  graphExpand?: number;
 }
 
 export interface PipelineResult {
@@ -72,7 +78,7 @@ export class RetrievalPipeline {
   }
 
   async search(query: string): Promise<PipelineResult> {
-    const pool = await this.recall(query);
+    const pool = this.maybeExpand(await this.recall(query));
     const topK = this.opts.topK ?? 5;
     if (!this.deps.reranker) return { hits: pool.slice(0, topK), pool };
 
@@ -85,6 +91,34 @@ export class RetrievalPipeline {
       liftedFrom: ranked.map((r) => r.before),
       scores: ranked.map((r) => r.score),
     };
+  }
+
+  /**
+   * 多查询检索：原始问题 + 若干改写各跑一路召回，RRF 按名次融合成一个候选池。
+   * 精排仍用【原始问题】打分——改写只负责把答案捞进池子，
+   * 最终"哪段最相关"必须以用户真正问的话为准。
+   */
+  async searchMulti(queries: string[]): Promise<PipelineResult> {
+    if (queries.length === 0) throw new Error("searchMulti 需要至少一个查询");
+    if (queries.length === 1) return this.search(queries[0]!);
+    const n = this.opts.poolSize ?? 50;
+    const pools: Array<{ name: string; items: Chunk[] }> = [];
+    for (const [i, q] of queries.entries()) {
+      pools.push({ name: `q${i}`, items: await this.recall(q) });
+    }
+    const pool = this.maybeExpand(rrf(pools, (c) => c.id, this.opts.rrfK ?? 60).slice(0, n).map((f) => f.item));
+    const topK = this.opts.topK ?? 5;
+    if (!this.deps.reranker) return { hits: pool.slice(0, topK), pool };
+    const m = this.opts.rerankTop && this.opts.rerankTop > 0 ? this.opts.rerankTop : pool.length;
+    const ranked = await rerank(this.deps.reranker, queries[0]!, pool.slice(0, m), (c) => c.context ?? c.text, topK);
+    return { hits: ranked.map((r) => r.item), pool, liftedFrom: ranked.map((r) => r.before), scores: ranked.map((r) => r.score) };
+  }
+
+  /** 图谱多跳扩展（可选）：邻居首段补池尾，只扩召回、不改排序权 */
+  private maybeExpand(pool: Chunk[]): Chunk[] {
+    const n = this.opts.graphExpand ?? 0;
+    if (n <= 0 || !this.deps.graph || !this.deps.allChunks) return pool;
+    return expandPoolByGraph(pool, this.deps.graph, this.deps.allChunks, { seedDocs: n, maxAdd: 5 }).pool;
   }
 
   private async recall(query: string): Promise<Chunk[]> {

@@ -106,3 +106,29 @@ test("rerankTop 只精排候选池前 N 条（成本旋钮）", async () => {
   const r = await p.search("玄武岩");
   assert.ok(r.liftedFrom!.every((x) => x <= 2), "只精排前 2 条时，结果不可能来自更靠后的候选");
 });
+
+test("多查询检索：改写查询能把原问题捞不到的答案带进候选池", async () => {
+  const chunks = [
+    C("noise1", "火山活动与板块边界的关系"),
+    C("noise2", "岩石圈的分层结构概述"),
+    C("gem", "玄武岩的气孔构造由气体逸出形成"),
+  ];
+  const bm = buildBm25(chunks);
+  const p = new RetrievalPipeline({ bm25: bm }, { mode: "bm25", poolSize: 3, topK: 3 });
+  // 原问题全口语，BM25 捞不到 gem；改写后的术语查询能
+  const miss = await p.searchMulti(["石头上的小洞哪来的"]);
+  assert.ok(!miss.pool.some((c) => c.id === "gem"), "原问题不该命中（前提校验）");
+  const hit = await p.searchMulti(["石头上的小洞哪来的", "玄武岩 气孔构造"]);
+  assert.ok(hit.pool.some((c) => c.id === "gem"), "改写查询应把答案带进候选池");
+});
+
+test("多查询 + 精排：精排用原始问题打分，且答案能进最终结果", async () => {
+  const chunks = [C("a", "板块构造概述"), C("gem", "气孔是气体逸出留下的孔洞")];
+  const p = new RetrievalPipeline(
+    { bm25: buildBm25(chunks), reranker: new FakeReranker() },
+    { mode: "bm25", poolSize: 2, topK: 1 },
+  );
+  const r = await p.searchMulti(["小洞 气孔 孔洞", "气孔 孔洞"]);
+  assert.equal(r.hits[0]!.id, "gem");
+  assert.ok(r.scores, "多查询+精排也要返回精排分数");
+});
